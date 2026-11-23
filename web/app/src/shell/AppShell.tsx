@@ -1,9 +1,6 @@
 import { lazy, Suspense, useEffect } from 'react';
-import { resumeSession } from '@/party/listenTogether';
-import { startPartySync } from '@/party/partySync';
 import { useDiscordPresence } from '@/playback/discordPresence';
 import { startHistoryReporting } from '@/playback/historyReporting';
-import { startLivePresence } from '@/playback/livePresence';
 import { Outlet } from 'react-router';
 import { PrefetchLink } from '@/components/PrefetchLink';
 import { config } from '@/config';
@@ -29,15 +26,8 @@ const FullScreenPlayer = lazy(() => import('./FullScreenPlayer').then((m) => ({ 
 export function AppShell() {
   useKeyboardShortcuts();
   useDiscordPresence();
-  // Listen Together: pick a party back up after a reload, and keep the player in step with it.
-  useEffect(() => {
-    resumeSession();
-    return startPartySync();
-  }, []);
   // Plays into the account's YouTube Music history (Settings › Share Listening Activity).
   useEffect(() => startHistoryReporting(), []);
-  // Counts this tab in the "listening now" figure beside the phone and PC apps.
-  useEffect(() => startLivePresence(), []);
   const extension = useExtension();
   const bannerDismissed = useUi((s) => s.installBannerDismissed);
   const dismissBanner = useUi((s) => s.dismissInstallBanner);

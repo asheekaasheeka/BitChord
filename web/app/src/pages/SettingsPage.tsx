@@ -1,4 +1,4 @@
-import { ChevronRight, Users } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { lazy, Suspense, useState, type ComponentType, type ReactNode } from 'react';
 import { MdOutlineExtension } from 'react-icons/md';
 import { SiApplemusic, SiDiscord, SiSpotify, SiYoutubemusic } from 'react-icons/si';
@@ -7,7 +7,6 @@ import { PrefetchLink } from '@/components/PrefetchLink';
 import { useDiscord } from '@/extension/useDiscord';
 import { useExtension } from '@/extension/useExtension';
 import { useYtAuth } from '@/extension/useYtAuth';
-import { useParty } from '@/party/useParty';
 import { useHistorySettings } from '@/playback/historyReporting';
 import { Select } from '@/components/Select';
 import { AUTOMIX_BARS } from '@/playback/automix/choices';
@@ -52,13 +51,12 @@ function youtubeText(auth: ReturnType<typeof useYtAuth>): string {
 
 /**
  * Settings (SettingsSheet on the phone): the account and its integrations,
- * Listen Together, playback and lyrics, in the same grouped rows.
+ * playback and lyrics, in the same grouped rows.
  */
 export default function SettingsPage() {
   const extension = useExtension();
   const yt = useYtAuth();
   const discord = useDiscord();
-  const party = useParty();
   const autoplay = usePlayer((s) => s.autoplay);
   const crossfadeSec = usePlayer((s) => s.crossfadeSec);
   const automix = usePlayer((s) => s.automix);
@@ -130,16 +128,6 @@ export default function SettingsPage() {
           <AppleMusicToggles />
         </section>
         <p className={settingsUi.footer}>From Apple Music’s public pages. No Apple Music account or sign-in needed.</p>
-
-        <h2 className={settingsUi.sectionHeader}>Listen Together</h2>
-        <section className={settingsUi.group}>
-          <LinkRow
-            to="/settings/listen-together"
-            icon={<Glyph Icon={Users} color="#fa2d48" />}
-            title="Listen Together"
-            value={party.code ? `In party ${party.code}` : 'Listen in sync with friends'}
-          />
-        </section>
 
         <h2 className={settingsUi.sectionHeader}>Playback</h2>
         <section className={settingsUi.group}>

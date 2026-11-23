@@ -340,8 +340,6 @@ function ensureAutomix(): Promise<AutomixGraph | null> {
         front: () => routed[active]!,
         back: () => routed[1 - active]!,
         current: () => {
-          // A party doesn't mix: every member would blend on their own clock (the phone stops too).
-          if (partyHooks?.inParty()) return null;
           // The sleep timer stops at this track's end: nothing to blend into.
           if (usePlayer.getState().sleepAfterTrack) return null;
           const { queue, index, status } = usePlayer.getState();
@@ -443,7 +441,6 @@ function automixHandoff() {
   usePlayer.setState((s) => ({ queue: plan.queue, index: plan.index, deck: s.deck + 1, status: 'playing' }));
   applyTrack(loaded.track, entry.track);
   afterTrackStarted();
-  intent();
 }
 
 // ---- Karaoke (playback/karaoke): the front deck's stems in place of its element ----
@@ -509,30 +506,6 @@ function hintOf(track: Track): NowPlaying {
   };
 }
 
-// ---- Listen Together's two doors (playback/PartySync.kt) ----------------------------
-//
-// Every user action reports an intent through [partyHooks]; that is how the
-// party hears about it. What the party does to this player goes through
-// [partyPlayer] instead, which reports nothing, so a correction can never
-// come back around as a control.
-
-export interface PartyHooks {
-  /** The user did something to playback, or the queue moved on by itself. */
-  onIntent(): void;
-  /** True when a resume must wait for the party's scheduled start (partySync starts it). */
-  shouldDeferPlay(): boolean;
-  /** A listener in a host-locked party: play/pause is theirs alone. True when handled. */
-  onLockedTransport(playing: boolean): boolean;
-  /** In a party, AutoPlay is the party's: one elected member tops up the shared queue. */
-  inParty(): boolean;
-}
-
-let partyHooks: PartyHooks | null = null;
-export function setPartyHooks(hooks: PartyHooks | null): void {
-  partyHooks = hooks;
-}
-const intent = () => partyHooks?.onIntent();
-
 // ---- Store ------------------------------------------------------------------------
 
 /** Each load gets a number; an answer for an older one is dropped. */
@@ -564,7 +537,6 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
       set({ queue: built.timeline });
       void startAt(built.startIndex);
     }
-    intent();
   },
 
   playTrack(track, source) {
@@ -572,7 +544,6 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
     canonical = null;
     set({ queue: buildOneOffQueue(queue, index, track, source) });
     void startAt(0);
-    intent();
   },
 
   async playVideo(videoId, hint = {}) {
@@ -594,12 +565,10 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
 
   playNext(tracks, source = null) {
     insertUser(tracks, source, true);
-    intent();
   },
 
   addToQueue(tracks, source = null) {
     insertUser(tracks, source, false);
-    intent();
   },
 
   jumpTo(target) {
@@ -609,7 +578,6 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
     if (!jumped) return;
     set({ queue: jumped.timeline });
     void startAt(jumped.index);
-    intent();
   },
 
   removeAt(at) {
@@ -617,7 +585,6 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
     if (at === index || at < 0 || at >= queue.length) return;
     set({ queue: queue.filter((_, i) => i !== at), index: at < index ? index - 1 : index });
     void refillAutoplay();
-    intent();
   },
 
   move(from, to) {
@@ -627,18 +594,16 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
     const [entry] = next.splice(from, 1);
     next.splice(to, 0, entry!);
     set({ queue: next });
-    intent();
   },
 
   clearUpNext() {
     const { queue, index } = get();
     const drop = new Set(upcomingUserQueueIndices(queue.map((e) => e.tier), index));
     set({ queue: queue.filter((_, i) => !drop.has(i)) });
-    intent();
   },
 
   next() {
-    void advance(false).then(intent);
+    void advance(false);
   },
 
   previous() {
@@ -648,7 +613,6 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
     if (index > 0) void startAt(index - 1);
     else if (repeat === 'all' && queue.length > 1) void startAt(queue.length - 1);
     else return get().seek(0);
-    intent();
   },
 
   togglePlay() {
@@ -660,19 +624,15 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
     const resuming = !audio || audio.paused || status === 'error';
     // A routed graph left suspended (no gesture when it was built) would play silence.
     if (resuming) void graph?.ctx.resume();
-    // A listener in a party the host has locked: the press moves this device alone.
-    if (partyHooks?.onLockedTransport(resuming)) return;
     if (!audio || status === 'error') {
       // A stopped or failed track starts again from where it was.
       void startAt(index, { startSec: audio?.currentTime ?? 0 });
     } else if (audio.paused) {
-      // In a party, a resume waits for the instant the server schedules for everyone.
-      if (!partyHooks?.shouldDeferPlay()) void audio.play().catch((e: unknown) => trackLog.w(`play() refused: ${String(e)}`));
+      void audio.play().catch((e: unknown) => trackLog.w(`play() refused: ${String(e)}`));
     } else {
       cancelCrossfade();
       audio.pause();
     }
-    intent();
   },
 
   seek(seconds) {
@@ -681,7 +641,6 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
     cancelCrossfade();
     audio.currentTime = Math.max(0, Math.min(seconds, audio.duration || seconds));
     updatePositionState();
-    intent();
   },
 
   toggleShuffle() {
@@ -943,8 +902,6 @@ const exhaustedSeeds = new Set<string>();
 function refillAutoplay(force = false, anySeed = false): Promise<void> {
   const { autoplay, repeat, queue, index } = usePlayer.getState();
   if (!autoplay || repeat !== 'off' || index < 0) return Promise.resolve();
-  // A party's AutoPlay goes through the server (party/partySync.ts), never straight onto this queue.
-  if (partyHooks?.inParty()) return Promise.resolve();
   const needed = MAX_QUEUED_AUTOPLAY - queue.slice(index + 1).filter((e) => e.tier === 'autoplay').length;
   if (needed <= 0) return Promise.resolve();
   // Seeded from the playing track (loadAutoplayForCurrentTrack), not the queue's tail.
@@ -1007,7 +964,7 @@ let lastEmptyRetry = 0;
  */
 function ensureAutoplay() {
   const { autoplay, repeat, queue, index, status } = usePlayer.getState();
-  if (!autoplay || repeat !== 'off' || index < 0 || status !== 'playing' || partyHooks?.inParty()) return;
+  if (!autoplay || repeat !== 'off' || index < 0 || status !== 'playing') return;
   if (index + 1 < queue.length || refilling) return;
   const now = Date.now();
   if (now - lastEmptyRetry < EMPTY_RETRY_MS) return;
@@ -1173,8 +1130,7 @@ function bindElement(deck: Deck, n: number) {
     if (fade?.pending) cancelCrossfade();
     // AutoMix's outgoing track ran out before the blend's midpoint (a stall): the incoming one is already playing.
     if (graph?.dj.forceHandoff()) return;
-    // The queue moving on by itself is the user's intent, as far as a party is concerned.
-    void advance(true).then(intent);
+    void advance(true);
   });
   element.addEventListener('timeupdate', () => {
     if (!inFront()) return;
@@ -1223,7 +1179,6 @@ function updateMediaSession(track: NowPlaying | null) {
     }
   };
   const player = () => usePlayer.getState();
-  // Through the store, so a party hears about them like any other press.
   // A loop mix holds the elements paused while it plays: that's playing, for the keys.
   const sounding = () => graph?.dj.loopMixing || getAudio()?.paused === false;
   handle('play', () => !sounding() && player().togglePlay());
@@ -1250,40 +1205,3 @@ function updatePositionState() {
     // Position past duration during a seek; the next event corrects it.
   }
 }
-
-// ---- The party's door (party/partySync.ts): moves the player, reports nothing ----------
-
-const PARTY_SOURCE: QueueSource = { title: 'Listen Together', type: 'queue' };
-
-export const partyPlayer = {
-  /** Puts the party's running order on the player at [index], at [startSec]; starts it only when [play]. */
-  load(tracks: Track[], tiers: ('user' | 'autoplay')[], index: number, startSec: number, play: boolean): Promise<void> {
-    canonical = null;
-    usePlayer.setState({ queue: tracks.map((t, i) => asEntry(t, tiers[i] ?? 'user', PARTY_SOURCE)) });
-    return startAt(index, { startSec, autoplay: play });
-  },
-  play(): void {
-    const audio = getAudio();
-    if (audio?.paused) void audio.play().catch((e: unknown) => trackLog.w(`party play() refused: ${String(e)}`));
-  },
-  pause(): void {
-    const audio = getAudio();
-    if (audio && !audio.paused) {
-      cancelCrossfade();
-      audio.pause();
-    }
-  },
-  seekTo(seconds: number): void {
-    const audio = getAudio();
-    if (!audio) return;
-    cancelCrossfade();
-    audio.currentTime = Math.max(0, seconds);
-    updatePositionState();
-  },
-  /** Replaces everything after the playing track; the playing track is left alone. */
-  setUpcoming(tracks: Track[], tiers: ('user' | 'autoplay')[]): void {
-    const { queue, index } = usePlayer.getState();
-    if (index < 0) return;
-    usePlayer.setState({ queue: [...queue.slice(0, index + 1), ...tracks.map((t, i) => asEntry(t, tiers[i] ?? 'user', PARTY_SOURCE))] });
-  },
-};

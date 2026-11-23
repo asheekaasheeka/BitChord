@@ -245,7 +245,7 @@ export default function ExtensionPage() {
           Sign-ins stay inside the extension: this page only ever sees results, never your cookies or tokens.
         </p>
         <p className={settingsUi.footer}>
-          Spotify Canvas, Discord presence and Listen Together are in{' '}
+          Spotify Canvas and Discord presence are in{' '}
           <PrefetchLink to="/settings" className={settingsUi.inlineLink}>
             Settings
           </PrefetchLink>
