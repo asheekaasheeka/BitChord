@@ -14,6 +14,7 @@ import { AUTOMIX_BARS } from '@/playback/automix/choices';
 import { CROSSFADE_CHOICES, usePlayer } from '@/state/player';
 import { AppleMusicIntegration, AppleMusicToggles, CanvasToggle, DiscordIntegration, LyricSourcesAccess, SpotifyIntegration, Toggle } from './IntegrationSettings';
 import { settingsUi } from './settingsStyles';
+import { EqualizerSettings } from './EqualizerSettings';
 
 const LyricsSettings = lazy(() => import('@/shell/LyricsSettings').then((m) => ({ default: m.LyricsSettings })));
 
@@ -183,6 +184,13 @@ export default function SettingsPage() {
             them. Songs it can’t read in time play to the end and crossfade. Based on AutoMix by David Finnegan (AGPL-3.0).
           </p>
         )}
+
+        <h2 className={settingsUi.sectionHeader}>Equalizer</h2>
+        <EqualizerSettings />
+        <p className={settingsUi.footer}>
+          Applies to everything the player plays. Turning it on routes playback through Web Audio until the page reloads. Double-click
+          a slider to reset it.
+        </p>
 
         <h2 className={settingsUi.sectionHeader}>Lyrics</h2>
         <section className={settingsUi.group}>

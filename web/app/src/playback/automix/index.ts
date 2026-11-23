@@ -1,6 +1,7 @@
 import { AutoDJ, type AutomixHost, type AutoDJSnapshot } from './engine/autodj';
 import { Deck } from './engine/deck';
 import { LoopDeck } from './engine/loopDeck';
+import { MasterEq } from '../equalizer';
 import type { TransitionPlan } from './engine/transition-scheduler';
 
 export type { AutomixHost, AutoDJSnapshot, TransitionPlan };
@@ -15,6 +16,8 @@ export interface AutomixGraph {
   ctx: AudioContext;
   /** The user's volume and mute. */
   master: GainNode;
+  /** The user's equaliser, between master and the speakers. */
+  eq: MasterEq;
   decks: Deck[];
   dj: AutoDJ;
 }
@@ -33,11 +36,11 @@ export function createAutomixGraph(
   const ctx = new AudioContext({ latencyHint: 'playback' });
   void ctx.resume();
   const master = new GainNode(ctx, { gain: 1 });
-  master.connect(ctx.destination);
+  const eq = new MasterEq(ctx, master, ctx.destination);
   const decks = audios.map((audio, n) => new Deck(n === 0 ? 'A' : 'B', ctx, audio, master));
   // the loop mix's stretch decks (AutoMix's own), built the first time a loop mix is prepared
   let loops: Promise<[LoopDeck, LoopDeck]> | null = null;
   const loopDecks = () => (loops ??= Promise.all([LoopDeck.create(ctx, master), LoopDeck.create(ctx, master)]));
   const dj = new AutoDJ({ ctx, loopDecks, ...host(decks) }, onUpdate);
-  return { ctx, master, decks, dj };
+  return { ctx, master, eq, decks, dj };
 }

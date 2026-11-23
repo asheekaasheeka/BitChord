@@ -21,6 +21,7 @@ import {
   type QueueSource,
 } from '@/playback/queue/timeline';
 import { trackLog } from '@/playback/trackLog';
+import { cleanBands } from '@/playback/equalizer';
 import type { LoadedTrack, StreamStats, YouTubeEngine } from '@/playback/youtube/engine';
 import type { AutomixGraph, AutoDJSnapshot } from '@/playback/automix';
 
@@ -57,6 +58,9 @@ interface Settings {
   automixBars: number;
   /** Stats for nerds: the stream's codec, bitrate and sample rate, and what Automix is doing, under the artist. */
   showNerdStats: boolean;
+  /** The manual equaliser (playback/equalizer.ts): on/off and its seven gains in dB. */
+  eqOn: boolean;
+  eqBands: number[];
 }
 
 interface PlayerState extends Settings {
@@ -102,6 +106,7 @@ interface PlayerState extends Settings {
   setAutomix: (on: boolean) => void;
   setAutomixBars: (bars: number) => void;
   setShowNerdStats: (on: boolean) => void;
+  setEq: (on: boolean, bands: number[]) => void;
 }
 
 // ---- Settings, kept across visits ---------------------------------------------------
@@ -117,21 +122,24 @@ const DEFAULT_SETTINGS: Settings = {
   automix: false,
   automixBars: 16,
   showNerdStats: false,
+  eqOn: false,
+  eqBands: [0, 0, 0, 0, 0, 0, 0],
 };
 
 function loadSettings(): Settings {
   try {
-    return { ...DEFAULT_SETTINGS, ...(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') as Partial<Settings>) };
+    const saved = { ...DEFAULT_SETTINGS, ...(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') as Partial<Settings>) };
+    return { ...saved, eqOn: saved.eqOn === true, eqBands: cleanBands(saved.eqBands) };
   } catch {
     return DEFAULT_SETTINGS;
   }
 }
 
 function saveSettings(state: Settings) {
-  const { shuffle, repeat, autoplay, volume, muted, crossfadeSec, automix, automixBars, showNerdStats } = state;
+  const { shuffle, repeat, autoplay, volume, muted, crossfadeSec, automix, automixBars, showNerdStats, eqOn, eqBands } = state;
   localStorage.setItem(
     SETTINGS_KEY,
-    JSON.stringify({ shuffle, repeat, autoplay, volume, muted, crossfadeSec, automix, automixBars, showNerdStats }),
+    JSON.stringify({ shuffle, repeat, autoplay, volume, muted, crossfadeSec, automix, automixBars, showNerdStats, eqOn, eqBands }),
   );
 }
 
@@ -291,6 +299,8 @@ function ensureAutomix(): Promise<AutomixGraph | null> {
     );
     graph = built;
     applyVolumes();
+    const { eqOn, eqBands } = usePlayer.getState();
+    built.eq.set(eqOn, eqBands);
     if (import.meta.env.DEV) Object.assign(window, { __bcAutomix: built, __bcAnalyzer: analyzer });
     return built;
   });
@@ -374,8 +384,16 @@ export async function karaokeRoute() {
   return { audio: deck.audio, engine: deck.engine, ctx: g.ctx, source: routed.source, input: routed.eq.input };
 }
 
+/** Applies the equaliser; turning it on builds the graph (the elements need Web Audio for it). */
+function syncEq() {
+  const { eqOn, eqBands } = usePlayer.getState();
+  if (graph) graph.eq.set(eqOn, eqBands);
+  else if (eqOn) void ensureAutomix().then((g) => void g?.ctx.resume());
+}
+
 /** Starts or stops the mix loop to match the setting; the first start builds the graph. */
 function syncAutomix() {
+  syncEq();
   if (!usePlayer.getState().automix) {
     graph?.dj.stop();
     return;
@@ -657,6 +675,12 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
   setShowNerdStats(showNerdStats) {
     set({ showNerdStats });
     saveSettings(get());
+  },
+
+  setEq(eqOn, bands) {
+    set({ eqOn, eqBands: cleanBands(bands) });
+    saveSettings(get());
+    syncEq();
   },
 }));
 
