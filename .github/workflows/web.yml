@@ -49,12 +49,8 @@ jobs:
         run: pnpm test
 
       # The app's build runs tsc then vite; the extension's builds Chrome and Firefox.
-      # The real party server is a Cloudflare Pages variable; this build is
-      # never deployed, it only needs a value to get past vite.config.ts.
       - name: Build
         run: pnpm build
-        env:
-          VITE_PARTY_SERVER_URL: https://party.example.com
 
   # The Windows client (web/windows): WebView2 shell plus the extension's webview2 build,
   # packed as a portable zip. Unsigned, not released; the zip is a workflow artifact.
@@ -80,14 +76,11 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      # Unlike the web job's throwaway build, this zip bundles the player, so it needs the real
-      # party server. Without the secret (fork PRs) build.ps1 stops with a clear message.
       - name: Build
         shell: pwsh
         run: ./web/windows/build.ps1 -Zip
         env:
           COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
-          VITE_PARTY_SERVER_URL: ${{ secrets.VITE_PARTY_SERVER_URL }}
 
       - uses: actions/upload-artifact@v4
         with:

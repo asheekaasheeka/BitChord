@@ -1,5 +1,4 @@
 import { useEffect, useReducer, useState } from 'react';
-import { useParty } from '@/party/listenTogether';
 import type { AutoDJSnapshot } from '@/playback/automix';
 import type { analyzer as Analyzer } from '@/playback/automix/analysis/analyzer';
 import type { NowPlaying } from '@/state/player';
@@ -48,12 +47,10 @@ function describeStream(np: NowPlaying): string | null {
 function AutomixLine({ videoId }: { videoId: string }) {
   const state = usePlayer((s) => s.automixState);
   const nextInQueue = usePlayer((s) => s.queue[s.index + 1]?.track.videoId ?? null);
-  const inParty = useParty((s) => !!s.code);
   const analyzer = useAnalyzer();
 
   let text: string;
-  if (inParty) text = 'Automix: stopped in Listen Together';
-  else if (state?.state === 'scheduled' && state.plan) text = describeBlend(state);
+  if (state?.state === 'scheduled' && state.plan) text = describeBlend(state);
   else if (state?.loop) text = `Automix · loop mix ready · ${describeLoop(state)}`;
   else {
     // This song is read where it will be mixed out (its ending's grid), the next where it comes in (its opening's).

@@ -12,6 +12,11 @@ const file = (over: Partial<LocalTrack>): LocalTrack => ({
   track: null,
   year: null,
   durationSec: null,
+  codec: null,
+  bitrateKbps: null,
+  sampleRateHz: null,
+  bitDepth: null,
+  channels: null,
   ...over,
 });
 

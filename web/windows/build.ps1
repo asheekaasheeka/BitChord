@@ -23,22 +23,6 @@ function Invoke-Native([string]$what, [scriptblock]$cmd) {
     if ($LASTEXITCODE -ne 0) { throw "$what failed (exit $LASTEXITCODE)" }
 }
 
-# vite.config.ts refuses a production build without the party server. Vite loads these files itself;
-# only check that the key is there, never read or print the value.
-$app = Join-Path $web 'app'
-$partyFiles = '.env', '.env.local', '.env.production', '.env.production.local' |
-    ForEach-Object { Join-Path $app $_ } | Where-Object { Test-Path $_ }
-$partyPlaceholder = $false
-if (-not $env:VITE_PARTY_SERVER_URL -and
-    -not ($partyFiles | Where-Object { Select-String -Quiet -Path $_ -Pattern '^\s*VITE_PARTY_SERVER_URL\s*=\s*\S' })) {
-    # shortcut: Listen Together is out of scope for the Windows client for now, so a placeholder lets the
-    # build run and the feature simply fails to connect. Set the real URL (and allow the app origin on the
-    # party server, JAM_ALLOWED_ORIGINS) when Listen Together should work.
-    Write-Warning 'VITE_PARTY_SERVER_URL is not set: using a placeholder, Listen Together will not work.'
-    $env:VITE_PARTY_SERVER_URL = 'https://party.example.com'
-    $partyPlaceholder = $true
-}
-
 # corepack must run from web/ (or below): the repo root has no matching packageManager.
 Push-Location $web
 try {
@@ -57,7 +41,6 @@ try {
     }
     Invoke-Native 'app build' { corepack pnpm --dir app build }
 } finally {
-    if ($partyPlaceholder) { Remove-Item Env:VITE_PARTY_SERVER_URL -ErrorAction SilentlyContinue }
     Pop-Location
 }
 

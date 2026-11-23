@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { karaokeRoute, setSegmentSink, usePlayer } from '@/state/player';
+import { localUrl } from '@/data/local/library';
 import { trackLog } from '@/playback/trackLog';
 import { KARAOKE_MAX_SEC, KARAOKE_SAMPLE_RATE, KaraokeError, karaokeSupported, separate } from './bridge';
 import { TrackCapture } from './capture';
@@ -110,26 +111,35 @@ async function start() {
     const durationSec = audio.duration;
     if (durationSec > KARAOKE_MAX_SEC) return fail('Karaoke works on songs up to 10 minutes.');
 
-    // 1. The whole song, from the segments Shaka downloads (it is told to fetch to the end).
-    engine.bufferWholeTrack(true);
+    // 1. The whole song: a local file straight from the app, else from the segments Shaka downloads
+    // (it is told to fetch to the end). Local files never go through Shaka, so nothing is captured.
     let file: Uint8Array | null = null;
-    try {
-      let last = -1;
-      let lastAt = performance.now();
-      for (;;) {
-        const capture = captures.get(videoId);
-        file = capture?.file(durationSec) ?? null;
-        if (file) break;
-        const covered = capture?.coverage(durationSec) ?? 0;
-        if (covered > last) [last, lastAt] = [covered, performance.now()];
-        // shortcut: a song started mid-way (a resumed session) never gets its opening segments; seek to 0 to fill them.
-        else if (performance.now() - lastAt > STALL_MS) return fail('Not all of this song could be loaded. Play it from the start and try again.');
-        useKaraoke.setState({ progress: covered });
-        await new Promise((r) => setTimeout(r, POLL_MS));
-        if (!current()) return;
+    const local = localUrl(videoId);
+    if (local) {
+      const response = await fetch(local, { signal: abort.signal });
+      if (!response.ok) return fail('This file could not be read. Rescan the folder and try again.');
+      file = new Uint8Array(await response.arrayBuffer());
+      if (!current()) return;
+    } else {
+      engine.bufferWholeTrack(true);
+      try {
+        let last = -1;
+        let lastAt = performance.now();
+        for (;;) {
+          const capture = captures.get(videoId);
+          file = capture?.file(durationSec) ?? null;
+          if (file) break;
+          const covered = capture?.coverage(durationSec) ?? 0;
+          if (covered > last) [last, lastAt] = [covered, performance.now()];
+          // shortcut: a song started mid-way (a resumed session) never gets its opening segments; seek to 0 to fill them.
+          else if (performance.now() - lastAt > STALL_MS) return fail('Not all of this song could be loaded. Play it from the start and try again.');
+          useKaraoke.setState({ progress: covered });
+          await new Promise((r) => setTimeout(r, POLL_MS));
+          if (!current()) return;
+        }
+      } finally {
+        engine.bufferWholeTrack(false);
       }
-    } finally {
-      engine.bufferWholeTrack(false);
     }
 
     // 2. PCM at the model's rate.

@@ -6,7 +6,7 @@ const HAVE_FUTURE_DATA = 3;
 
 /**
  * Plays the instrumental and the lead vocal in step with a (silent) <audio> element, which stays the
- * clock: the lyrics, the seek bar and Listen Together keep reading it. Restarts the stems on every
+ * clock: the lyrics and the seek bar keep reading it. Restarts the stems on every
  * play, seek, rate change or stall, and when they drift.
  */
 export class StemPlayer {

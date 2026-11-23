@@ -37,11 +37,10 @@ To upstream any of it later, split it into small PRs first, starting with the we
 
 ### Known limits
 - Not fully tested: Google sign-in inside WebView2 (Google may block it with "This browser or app may not be secure"), parts of the Discord flow, and some tray menu actions.
-- Listen Together does not work unless `VITE_PARTY_SERVER_URL` is set (the build falls back to a placeholder).
-- Karaoke: a song resumed from the middle must be replayed from the start; songs longer than 10 minutes are refused; stems are not cached; it is off while AutoMix is on; it does not work for local files.
-- Local music in a Listen Together session cannot be heard by other participants.
+- Karaoke: a song resumed from the middle must be replayed from the start; songs longer than 10 minutes are refused; stems are not cached; it is off while AutoMix is on.
 - An app update that changes the extension files likely clears `chrome.storage` (reconnect Discord afterwards).
 - No media keys/SMTC, installer or auto-update.
+- Listen Together is removed from the web player and the Windows client (no party server, no "listening now" presence ping). The Android app and `backend/` still have it, unchanged from upstream.
 - Stats for nerds values (Web Audio format, output sample rate) are app telemetry, not proof of hardware or DAC behaviour.
 
 ## Security risks
@@ -93,8 +92,6 @@ cd web
 corepack pnpm test
 dotnet test windows/BitChord.Windows.Tests
 ```
-
-Optional: set `VITE_PARTY_SERVER_URL` (environment variable or `web/app/.env.local`) so Listen Together works. The party server must allow the origin `https://app.bitchord.example` (`JAM_ALLOWED_ORIGINS`).
 
 The Android app builds as upstream: `.\gradlew.bat assembleDevDebug`. Use the `dev` flavour so it does not touch the `prod` app's data.
 
