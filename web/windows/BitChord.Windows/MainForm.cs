@@ -35,6 +35,13 @@ sealed class MainForm : Form
         Size = new Size(1280, 800);
         StartPosition = FormStartPosition.CenterScreen;
         Controls.Add(webView);
+        // F11 reaches the form only through WebView2's accelerator-key forwarding.
+        webView.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode != Keys.F11 || e.Modifiers != Keys.None) return;
+            e.Handled = true;
+            BeginInvoke(ToggleFullscreen); // the browser process is blocked while this handler runs
+        };
         RestoreWindow();
     }
 
@@ -79,6 +86,8 @@ sealed class MainForm : Form
             // Main window only (popups keep web messages off); the bridge answers the player's origin alone.
             core.Settings.IsWebMessageEnabled = true;
             karaoke = new KaraokeBridge(this, core);
+            // The player's fullscreen button (requestFullscreen) otherwise fills only the control, not the screen.
+            core.ContainsFullScreenElementChanged += (_, _) => { pageFullscreen = core.ContainsFullScreenElement; ApplyFullscreen(); };
             await InstallExtensionAsync(core.Profile);
             if (IsDisposed || Disposing) return;
             core.Navigate(Browser.StartUri.AbsoluteUri);
@@ -176,6 +185,39 @@ sealed class MainForm : Form
         }
     }
 
+    bool appFullscreen, pageFullscreen, isFullscreen;
+    FormWindowState stateBeforeFullscreen;
+
+    void ToggleFullscreen()
+    {
+        // F11 during the player's fullscreen leaves it the way Esc would.
+        if (pageFullscreen) { _ = webView.CoreWebView2?.ExecuteScriptAsync("document.exitFullscreen()"); appFullscreen = false; return; }
+        appFullscreen = !appFullscreen;
+        ApplyFullscreen();
+    }
+
+    void ApplyFullscreen()
+    {
+        var want = appFullscreen || pageFullscreen;
+        if (want == isFullscreen) return;
+        isFullscreen = want;
+        if (want)
+        {
+            stateBeforeFullscreen = WindowState == FormWindowState.Minimized ? FormWindowState.Normal : WindowState;
+            FormBorderStyle = FormBorderStyle.None;
+            // Maximising a borderless window covers the taskbar; re-maximise if it already was.
+            if (WindowState == FormWindowState.Maximized) WindowState = FormWindowState.Normal;
+            WindowState = FormWindowState.Maximized;
+        }
+        else
+        {
+            FormBorderStyle = FormBorderStyle.Sizable;
+            WindowState = FormWindowState.Normal; // drop the borderless maximise before restoring
+            WindowState = stateBeforeFullscreen;
+            DarkTitleBar.Apply(this);
+        }
+    }
+
     public void ShowFromTray()
     {
         Show();
@@ -267,11 +309,13 @@ sealed class MainForm : Form
         base.OnFormClosing(e);
         if (e.Cancel) return;
         var b = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+        // Fullscreen is not saved: next start opens the window as it was before fullscreen.
+        var maximized = isFullscreen ? stateBeforeFullscreen == FormWindowState.Maximized : WindowState == FormWindowState.Maximized;
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(AppPaths.WindowStateFile)!);
             File.WriteAllText(AppPaths.WindowStateFile, JsonSerializer.Serialize(
-                new SavedWindow(b.X, b.Y, b.Width, b.Height, WindowState == FormWindowState.Maximized)));
+                new SavedWindow(b.X, b.Y, b.Width, b.Height, maximized)));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
