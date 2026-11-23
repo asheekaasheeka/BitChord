@@ -122,7 +122,8 @@ export class MasterEq {
       const kind = kindOf(i);
       return new BiquadFilterNode(ctx, { type: kind === 'bell' ? 'peaking' : kind, frequency, Q: BELL_Q, gain: 0 });
     });
-    this.filters.reduce<AudioNode>((prev, f) => prev.connect(f), this.filters[0]!);
+    // Chain each filter to the next; never a filter to itself (a feedback loop that screams).
+    for (let i = 1; i < this.filters.length; i++) this.filters[i - 1]!.connect(this.filters[i]!);
     this.input = this.filters[0]!;
     this.preamp = new GainNode(ctx, { gain: 1 / HEADROOM });
     const curve = new Float32Array(4097);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanBands, EQ_PRESETS, matchingPreset, preampDb, sectionGainDb, softClip } from './equalizer';
+import { cleanBands, EQ_PRESETS, MasterEq, matchingPreset, preampDb, sectionGainDb, softClip } from './equalizer';
 
 describe('equalizer', () => {
   it('a bell reaches its gain at the centre, a shelf far past its corner', () => {
@@ -25,6 +25,37 @@ describe('equalizer', () => {
   it('cleans stored bands', () => {
     expect(cleanBands(undefined)).toEqual([0, 0, 0, 0, 0, 0, 0]);
     expect(cleanBands([20, -20, 'x', 3])).toEqual([12, -12, 0, 3, 0, 0, 0]);
+  });
+
+  it('wires one straight chain with no loop, and bypasses it when off', () => {
+    const edges = new Set<string>();
+    let n = 0;
+    class Node {
+      readonly id = `n${n++}`;
+      gain = { setTargetAtTime() {} };
+      connect(to: Node) {
+        edges.add(`${this.id}>${to.id}`);
+        return to;
+      }
+      disconnect() {
+        for (const e of [...edges]) if (e.startsWith(`${this.id}>`)) edges.delete(e);
+      }
+    }
+    Object.assign(globalThis, { BiquadFilterNode: Node, GainNode: Node, WaveShaperNode: Node });
+    const from = new Node();
+    const to = new Node();
+    const eq = new MasterEq({ currentTime: 0 } as unknown as BaseAudioContext, from as never, to as never);
+    const chain = [...edges];
+    expect(chain.some((e) => e.split('>')[0] === e.split('>')[1])).toBe(false);
+    // 7 filters -> preamp -> shaper -> to is 9 edges, plus the bypass from -> to.
+    expect(chain).toHaveLength(10);
+    expect(edges.has(`${from.id}>${to.id}`)).toBe(true);
+
+    eq.set(true, [...EQ_PRESETS.Rock]);
+    expect(edges.has(`${from.id}>${to.id}`)).toBe(false);
+    expect([...edges].filter((e) => e.startsWith(`${from.id}>`))).toHaveLength(1);
+    eq.set(false, [...EQ_PRESETS.Rock]);
+    expect(edges.has(`${from.id}>${to.id}`)).toBe(true);
   });
 
   it('soft clip is linear below the knee and stays inside ±1', () => {
