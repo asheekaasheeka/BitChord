@@ -2,6 +2,7 @@ import { Maximize2 } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 import { LogoMark } from '@/components/icons/LogoMark';
+import { ArtPlaceholder } from '@/components/music/Artwork';
 import { ExplicitBadge } from '@/components/music/ExplicitBadge';
 import { VideoSurface } from '@/components/music/VideoSurface';
 import { albumHref, artistHref } from '@/components/music/links';
@@ -126,6 +127,7 @@ export function Lcd() {
         aria-label="Open full screen player"
         onClick={() => openFullScreen(true)}
       >
+        <ArtPlaceholder size={16} />
         {nowPlaying.artworkUrl && (
           <img
             key={nowPlaying.artworkUrl}
@@ -133,7 +135,7 @@ export function Lcd() {
             alt=""
             referrerPolicy="no-referrer"
             decoding="async"
-            className="size-full object-cover opacity-0 transition-opacity duration-200 ease-in data-loaded:opacity-100"
+            className="relative size-full object-cover opacity-0 transition-opacity duration-200 ease-in data-loaded:opacity-100"
             onLoad={(e) => e.currentTarget.setAttribute('data-loaded', '')}
           />
         )}

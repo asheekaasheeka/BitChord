@@ -3,7 +3,8 @@ import { useParty } from '@/party/listenTogether';
 import type { AutoDJSnapshot } from '@/playback/automix';
 import type { analyzer as Analyzer } from '@/playback/automix/analysis/analyzer';
 import type { NowPlaying } from '@/state/player';
-import { usePlayer } from '@/state/player';
+import { audioOutput, usePlayer } from '@/state/player';
+import { describeOutput } from './outputText';
 
 /**
  * Stats for nerds, under the artist in the full-screen player (the phone's
@@ -19,6 +20,9 @@ export function NerdStats() {
     // The phone's shadow: free on the dark mesh, and what keeps it legible over a bright music video.
     <div className="mt-1 flex min-w-0 flex-col gap-px type-[500_11px/14px] tabular-nums [text-shadow:0_1px_4px_rgb(0_0_0/0.55)]">
       <span className="truncate text-secondary">{describeStream(nowPlaying) ?? 'Measuring the stream…'}</span>
+      {nowPlaying.stream && (
+        <span className="truncate text-secondary">{describeOutput(nowPlaying.stream.sampleRateHz, audioOutput())}</span>
+      )}
       {automix && <AutomixLine videoId={nowPlaying.videoId} />}
     </div>
   );
@@ -31,10 +35,11 @@ function describeStream(np: NowPlaying): string | null {
   const parts = [
     s.codec,
     s.sampleRateHz ? `${+(s.sampleRateHz / 1000).toFixed(1)} kHz` : null,
+    s.bitDepth ? `${s.bitDepth}-bit` : null,
     s.bitrateKbps ? `${s.bitrateKbps} kbps` : null,
     s.channels ? ({ 1: 'Mono', 2: 'Stereo' } as Record<number, string>)[s.channels] ?? `${s.channels} channels` : null,
     s.itag ? `itag ${s.itag}` : null,
-    `${s.client} ${s.mode}`,
+    s.mode === 'local' ? 'local file' : `${s.client} ${s.mode}`,
   ];
   return parts.filter(Boolean).join(' · ');
 }

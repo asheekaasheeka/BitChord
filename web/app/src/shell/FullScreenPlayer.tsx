@@ -13,6 +13,7 @@ import {
   ShuffleIcon,
   UpNextIcon,
 } from '@/components/icons/Transport';
+import { ArtPlaceholder } from '@/components/music/Artwork';
 import { ExplicitBadge } from '@/components/music/ExplicitBadge';
 import { FavoriteButton } from '@/components/music/FavoriteButton';
 import { TrackMenu } from '@/components/music/TrackMenu';
@@ -294,6 +295,12 @@ export function FullScreenPlayer() {
               video ? ' aspect-video overflow-hidden bg-black' : ' aspect-square'
             }${playing ? '' : ' scale-92'}${column ? ' max-md:hidden' : ''}${theater ? ' hidden' : ''}`}
           >
+            {!video && (
+              // Under the cover: shows when there is none, or it fails to load.
+              <div className="absolute inset-0 rounded-[inherit] bg-[#ffffff12]">
+                <ArtPlaceholder size={96} />
+              </div>
+            )}
             {nowPlaying.artworkUrl && (
               <>
                 <img

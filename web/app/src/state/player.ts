@@ -21,6 +21,9 @@ import {
   type QueueSource,
 } from '@/playback/queue/timeline';
 import { trackLog } from '@/playback/trackLog';
+import { isLocal } from '@/data/local/library';
+import { cleanBands } from '@/playback/equalizer';
+import { loudnessGain } from '@/playback/loudness';
 import type { LoadedTrack, StreamStats, YouTubeEngine } from '@/playback/youtube/engine';
 import type { AutomixGraph, AutoDJSnapshot } from '@/playback/automix';
 
@@ -57,6 +60,13 @@ interface Settings {
   automixBars: number;
   /** Stats for nerds: the stream's codec, bitrate and sample rate, and what Automix is doing, under the artist. */
   showNerdStats: boolean;
+  /** The manual equaliser (playback/equalizer.ts): on/off and its seven gains in dB. */
+  eqOn: boolean;
+  eqBands: number[];
+  /** Turn loud tracks down to YouTube's reference level (playback/loudness.ts). */
+  normalize: boolean;
+  /** Wider stereo with a short cross-feed (playback/spatial.ts). */
+  spatial: boolean;
 }
 
 interface PlayerState extends Settings {
@@ -102,6 +112,15 @@ interface PlayerState extends Settings {
   setAutomix: (on: boolean) => void;
   setAutomixBars: (bars: number) => void;
   setShowNerdStats: (on: boolean) => void;
+  setEq: (on: boolean, bands: number[]) => void;
+  setNormalize: (on: boolean) => void;
+  setSpatial: (on: boolean) => void;
+  /** Sleep timer: when it pauses (performance.now() ms), or null. Not saved. */
+  sleepAt: number | null;
+  /** Sleep timer: pause when the playing track ends. */
+  sleepAfterTrack: boolean;
+  /** Minutes from now, 'track' for the end of this track, or null to cancel. */
+  setSleepTimer: (when: number | 'track' | null) => void;
 }
 
 // ---- Settings, kept across visits ---------------------------------------------------
@@ -117,21 +136,32 @@ const DEFAULT_SETTINGS: Settings = {
   automix: false,
   automixBars: 16,
   showNerdStats: false,
+  eqOn: false,
+  eqBands: [0, 0, 0, 0, 0, 0, 0],
+  normalize: true,
+  spatial: false,
 };
 
 function loadSettings(): Settings {
   try {
-    return { ...DEFAULT_SETTINGS, ...(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') as Partial<Settings>) };
+    const saved = { ...DEFAULT_SETTINGS, ...(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') as Partial<Settings>) };
+    return {
+      ...saved,
+      eqOn: saved.eqOn === true,
+      eqBands: cleanBands(saved.eqBands),
+      normalize: saved.normalize !== false,
+      spatial: saved.spatial === true,
+    };
   } catch {
     return DEFAULT_SETTINGS;
   }
 }
 
 function saveSettings(state: Settings) {
-  const { shuffle, repeat, autoplay, volume, muted, crossfadeSec, automix, automixBars, showNerdStats } = state;
+  const { shuffle, repeat, autoplay, volume, muted, crossfadeSec, automix, automixBars, showNerdStats, eqOn, eqBands, normalize, spatial } = state;
   localStorage.setItem(
     SETTINGS_KEY,
-    JSON.stringify({ shuffle, repeat, autoplay, volume, muted, crossfadeSec, automix, automixBars, showNerdStats }),
+    JSON.stringify({ shuffle, repeat, autoplay, volume, muted, crossfadeSec, automix, automixBars, showNerdStats, eqOn, eqBands, normalize, spatial }),
   );
 }
 
@@ -142,6 +172,14 @@ interface Deck {
   audio: HTMLAudioElement;
   /** The crossfade's share of the volume, 0–1. */
   gain: number;
+  /** YouTube's loudness figure for the track this deck holds, for normalization. */
+  loudnessDb: number | null;
+}
+
+/** Remembers [track]'s loudness on [deck] and re-levels. Every load on a deck goes through here. */
+function levelDeck(deck: Deck, track: LoadedTrack) {
+  deck.loudnessDb = track.loudnessDb;
+  applyVolumes();
 }
 
 let decks: Deck[] | null = null;
@@ -169,6 +207,27 @@ export function getPlayhead(): { sec: number; paused: boolean } | null {
   return audio ? { sec: audio.currentTime, paused: audio.paused } : null;
 }
 
+let deviceRate: number | null | undefined;
+
+/**
+ * Where decoded audio goes, for stats for nerds: through Web Audio (EQ, spatial, AutoMix, karaoke) or
+ * straight to Chromium's output, and the rate it is mixed at. Both paths run at the output device's
+ * rate, which a throwaway AudioContext reports. Not what the DAC receives: Windows' shared mixer has the last word.
+ */
+export function audioOutput(): { webAudio: boolean; sampleRateHz: number | null } {
+  if (graph) return { webAudio: true, sampleRateHz: graph.ctx.sampleRate };
+  if (deviceRate === undefined) {
+    try {
+      const probe = new AudioContext();
+      deviceRate = probe.sampleRate;
+      void probe.close();
+    } catch {
+      deviceRate = null;
+    }
+  }
+  return { webAudio: false, sampleRateHz: deviceRate };
+}
+
 /** The running Automix blend's beat (phase 0 on the beat), for the seek bar's pulse; null between blends. */
 export function getMixBeat(): { phase: number | null } | null {
   return graph?.dj.mixBeat() ?? null;
@@ -186,13 +245,15 @@ function getDecks(): Promise<Deck[]> {
       // is fetched with CORS (prompt §6, the Web Audio caveat).
       audio.crossOrigin = 'anonymous';
       const engine = new YouTubeEngine(audio);
-      const deck: Deck = { engine, audio, gain: 1 };
+      engine.onSegment = segmentSink;
+      const deck: Deck = { engine, audio, gain: 1, loudnessDb: null };
       engine.onFatal = (videoId, message) => {
         if (decks?.[active] !== deck) return;
         trackLog.e(`stopped: ${message}`, videoId);
         usePlayer.setState({ status: 'error', error: message });
       };
       engine.onRecovered = (track) => {
+        levelDeck(deck, track);
         if (decks?.[active] !== deck) return;
         // Keep YouTube Music's title and artist: without the queue's track the
         // video's own ("Doja Cat - Woman" by "dojacatVEVO") would replace them.
@@ -213,18 +274,46 @@ function getDecks(): Promise<Deck[]> {
 
 function applyVolumes() {
   const { volume, muted } = usePlayer.getState();
-  const level = muted ? 0 : Math.min(1, Math.max(0, volume));
+  const level = (muted ? 0 : Math.min(1, Math.max(0, volume))) * sleepFade;
+  const { normalize } = usePlayer.getState();
+  const norm = (deck: Deck) => (normalize ? loudnessGain(deck.loudnessDb) : 1);
   if (graph) {
     // Routed through Web Audio: the elements stay at 1 and the graph carries volume and the fade.
     const now = graph.ctx.currentTime;
     graph.master.gain.setTargetAtTime(level, now, 0.015);
     (decks ?? []).forEach((deck, n) => {
       deck.audio.volume = 1;
-      graph!.decks[n]!.fader.gain.setTargetAtTime(deck.gain, now, 0.015);
+      graph!.decks[n]!.fader.gain.setTargetAtTime(deck.gain * norm(deck), now, 0.015);
     });
     return;
   }
-  for (const deck of decks ?? []) deck.audio.volume = level * deck.gain;
+  for (const deck of decks ?? []) deck.audio.volume = level * deck.gain * norm(deck);
+}
+
+// ---- Sleep timer (the phone's SleepTimer.kt): fades out over the last 30 s, then pauses ----
+
+const SLEEP_FADE_MS = 30_000;
+/** The sleep timer's share of the volume, 0–1. */
+let sleepFade = 1;
+let sleepTick: ReturnType<typeof setInterval> | null = null;
+
+function syncSleepTimer() {
+  if (sleepTick) clearInterval(sleepTick);
+  sleepTick = null;
+  sleepFade = 1;
+  applyVolumes();
+  if (usePlayer.getState().sleepAt === null) return;
+  sleepTick = setInterval(() => {
+    const at = usePlayer.getState().sleepAt;
+    if (at === null) return;
+    const left = at - performance.now();
+    sleepFade = Math.min(1, Math.max(0, left / SLEEP_FADE_MS));
+    applyVolumes();
+    if (left > 0) return;
+    const { status, togglePlay } = usePlayer.getState();
+    if (status === 'playing' || status === 'buffering') togglePlay();
+    usePlayer.getState().setSleepTimer(null);
+  }, 250);
 }
 
 // ---- AutoMix (playback/automix): the two decks routed through Web Audio, mixed like a DJ ----
@@ -253,6 +342,8 @@ function ensureAutomix(): Promise<AutomixGraph | null> {
         current: () => {
           // A party doesn't mix: every member would blend on their own clock (the phone stops too).
           if (partyHooks?.inParty()) return null;
+          // The sleep timer stops at this track's end: nothing to blend into.
+          if (usePlayer.getState().sleepAfterTrack) return null;
           const { queue, index, status } = usePlayer.getState();
           const entry = queue[index];
           return entry && status === 'playing' ? queued(entry) : null;
@@ -267,6 +358,7 @@ function ensureAutomix(): Promise<AutomixGraph | null> {
           applyVolumes();
           try {
             const track = await back.engine.load(videoId, { autoplay: false });
+            levelDeck(back, track);
             mixLoaded = { videoId, track };
             return true;
           } catch (error) {
@@ -290,6 +382,8 @@ function ensureAutomix(): Promise<AutomixGraph | null> {
     );
     graph = built;
     applyVolumes();
+    const { eqOn, eqBands, spatial } = usePlayer.getState();
+    built.fx.set(eqOn, eqBands, spatial);
     if (import.meta.env.DEV) Object.assign(window, { __bcAutomix: built, __bcAnalyzer: analyzer });
     return built;
   });
@@ -352,8 +446,37 @@ function automixHandoff() {
   intent();
 }
 
+// ---- Karaoke (playback/karaoke): the front deck's stems in place of its element ----
+
+type SegmentSink = YouTubeEngine['onSegment'];
+let segmentSink: SegmentSink = null;
+
+/** Every segment either deck downloads goes to [sink]; set once, before or after the decks exist. */
+export function setSegmentSink(sink: SegmentSink): void {
+  segmentSink = sink;
+  for (const deck of decks ?? []) deck.engine.onSegment = sink;
+}
+
+/** The deck in front, routed through Web Audio (the graph is built on first use); null before the first play. */
+export async function karaokeRoute() {
+  const g = await ensureAutomix();
+  const deck = decks?.[active];
+  const routed = g?.decks[active];
+  if (!g || !deck || !routed) return null;
+  void g.ctx.resume();
+  return { audio: deck.audio, engine: deck.engine, ctx: g.ctx, source: routed.source, input: routed.eq.input };
+}
+
+/** Applies the equaliser and spatial audio; turning one on builds the graph (they need Web Audio). */
+function syncEq() {
+  const { eqOn, eqBands, spatial } = usePlayer.getState();
+  if (graph) graph.fx.set(eqOn, eqBands, spatial);
+  else if (eqOn || spatial) void ensureAutomix().then((g) => void g?.ctx.resume());
+}
+
 /** Starts or stops the mix loop to match the setting; the first start builds the graph. */
 function syncAutomix() {
+  syncEq();
   if (!usePlayer.getState().automix) {
     graph?.dj.stop();
     return;
@@ -636,6 +759,34 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
     set({ showNerdStats });
     saveSettings(get());
   },
+
+  setEq(eqOn, bands) {
+    set({ eqOn, eqBands: cleanBands(bands) });
+    saveSettings(get());
+    syncEq();
+  },
+
+  setNormalize(normalize) {
+    set({ normalize });
+    saveSettings(get());
+    applyVolumes();
+  },
+
+  setSpatial(spatial) {
+    set({ spatial });
+    saveSettings(get());
+    syncEq();
+  },
+
+  sleepAt: null,
+  sleepAfterTrack: false,
+  setSleepTimer(when) {
+    set({
+      sleepAt: typeof when === 'number' ? performance.now() + when * 60_000 : null,
+      sleepAfterTrack: when === 'track',
+    });
+    syncSleepTimer();
+  },
 }));
 
 // For browser-driven tests, next to __bcAudio.
@@ -693,6 +844,7 @@ async function startAt(at: number, { startSec = 0, auto = false, autoplay = true
     deck.gain = 1;
     applyVolumes();
     const track = await deck.engine.load(entry.track.videoId, { startSec, autoplay });
+    levelDeck(deck, track);
     if (token !== loadToken) return;
     applyTrack(track, entry.track);
     if (!autoplay) usePlayer.setState({ status: 'paused' });
@@ -797,6 +949,8 @@ function refillAutoplay(force = false, anySeed = false): Promise<void> {
   if (needed <= 0) return Promise.resolve();
   // Seeded from the playing track (loadAutoplayForCurrentTrack), not the queue's tail.
   const playing = queue[index]?.track;
+  // YouTube Music's radio has nothing to say about a local file.
+  if (isLocal(playing?.videoId)) return Promise.resolve();
   let seed = playing;
   if (seed && exhaustedSeeds.has(seed.videoId) && anySeed) {
     seed = queue
@@ -898,7 +1052,7 @@ function cancelCrossfade() {
 /** Called as the track in front plays: within the crossfade length of its end, start the next one underneath. */
 function maybeCrossfade() {
   const state = usePlayer.getState();
-  if (!decks || fade || state.automix || !state.crossfadeSec || state.status !== 'playing') return;
+  if (!decks || fade || state.automix || !state.crossfadeSec || state.status !== 'playing' || state.sleepAfterTrack) return;
   const front = decks[active]!;
   const remaining = front.audio.duration - front.audio.currentTime;
   if (!Number.isFinite(remaining) || remaining > state.crossfadeSec || remaining < 1) return;
@@ -916,6 +1070,7 @@ function maybeCrossfade() {
   back.engine
     .load(entry.track.videoId, { autoplay: true })
     .then((track) => {
+      levelDeck(back, track);
       if (!fade || fade.token !== token || !decks) return;
       fade.pending = false;
       const from = front;
@@ -967,7 +1122,7 @@ function applyTrack(track: LoadedTrack, from?: Track) {
     artist: (from && artistNames(from)) || track.author.replace(/ - Topic$/, ''),
     artworkUrl: from?.thumbnail ?? track.thumbnails[0]?.url ?? null,
     durationSec: track.durationSec || from?.durationSec || 0,
-    streamInfo: `${track.format} via ${track.client}`,
+    streamInfo: track.client === 'local' ? `${track.format}, local file` : `${track.format} via ${track.client}`,
     stream: { ...track.stream, client: track.client },
   };
   usePlayer.setState({ nowPlaying, error: null });
@@ -1006,6 +1161,11 @@ function bindElement(deck: Deck, n: number) {
   element.addEventListener('ended', () => {
     if (!inFront() || holding) return;
     endedListeners.forEach((listener) => listener());
+    if (usePlayer.getState().sleepAfterTrack) {
+      usePlayer.getState().setSleepTimer(null);
+      usePlayer.setState({ status: 'paused' });
+      return;
+    }
     // The track ran out before the crossfade's next one could start: give up
     // on the fade and play the next track here. Waiting on it was silence for
     // as long as that load took, which on a slow or failing load (each client

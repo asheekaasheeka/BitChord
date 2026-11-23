@@ -54,6 +54,8 @@ export class Deck {
   /** BitChord: the filter mix's high- and low-pass, open (inaudible) except during one. */
   readonly sweep: { highpass: BiquadFilterNode; lowpass: BiquadFilterNode };
   readonly timeline = new Timeline();
+  /** BitChord: the element's node; karaoke mutes it (through a gain of 0, never unplugged) and plays its stems into the EQ. */
+  readonly source: MediaElementAudioSourceNode;
   loaded: LoadedTrackMeta | null = null;
   /** How long play() takes to put audio out, learned from each start. */
   latencySec = 0.12;
@@ -86,7 +88,8 @@ export class Deck {
       highpass: new BiquadFilterNode(ctx, { type: 'highpass', frequency: 20, Q: 0.7 }),
       lowpass: new BiquadFilterNode(ctx, { type: 'lowpass', frequency: 20000, Q: 0.7 }),
     };
-    ctx.createMediaElementSource(audio).connect(this.eq.input);
+    this.source = ctx.createMediaElementSource(audio);
+    this.source.connect(this.eq.input);
     this.eq.output.connect(this.sweep.highpass).connect(this.sweep.lowpass).connect(this.gain).connect(this.fader).connect(destination);
     audio.preservesPitch = true;
   }

@@ -42,7 +42,10 @@ keystore.properties
 
 # AI agent configuration
 AGENTS.md
+CLAUDE.md
+run-dev.bat
 /output/
+/PLAN/
 
 # Built packages — release APKs/bundles are handed out, never committed
 *.apk

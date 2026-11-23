@@ -1,4 +1,5 @@
 import { albumHref, artistHref } from '@/components/music/links';
+import { isLocal } from '@/data/local/library';
 import { fetchTrackLinks, findArtistPageId } from '@/data/music/api';
 import type { AlbumRef, ArtistRef } from '@/data/music/types';
 import { isExactArtistMatch, normalizedArtistName } from '@/lib/artistCredits';
@@ -6,6 +7,8 @@ import { queryClient } from '@/lib/queryClient';
 
 /** The track's own watch-queue entry, asked for once per track. */
 function trackLinks(videoId: string) {
+  // A local file has no watch page; its names go to search instead.
+  if (isLocal(videoId)) return Promise.resolve(null);
   return queryClient
     .fetchQuery({ queryKey: ['music', 'track-links', videoId], queryFn: () => fetchTrackLinks(videoId), staleTime: Infinity })
     .catch(() => null);

@@ -1,4 +1,5 @@
 import { StarFilledIcon, StarIcon } from '@/components/icons/Transport';
+import { isLocal } from '@/data/local/library';
 import { useLikeStatus, useSetLiked, useSignedIn } from '@/data/music/queries';
 
 interface FavoriteButtonProps {
@@ -12,7 +13,9 @@ interface FavoriteButtonProps {
  * Liked Music). Only shown signed in; the state is read from the track's
  * watch page, as YouTube's own player reads it.
  */
-export function FavoriteButton({ videoId, className, size = 18 }: FavoriteButtonProps) {
+export function FavoriteButton({ videoId: id, className, size = 18 }: FavoriteButtonProps) {
+  // A local file has no YouTube Music like.
+  const videoId = isLocal(id) ? null : id;
   const signedIn = useSignedIn();
   const status = useLikeStatus(videoId);
   const setLiked = useSetLiked();

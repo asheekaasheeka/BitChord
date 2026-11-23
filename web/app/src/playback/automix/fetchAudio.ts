@@ -1,3 +1,4 @@
+import { localUrl } from '@/data/local/library';
 import { botguard } from '@/playback/youtube/botguard';
 import { ytAuthSnapshot } from '@/extension/useYtAuth';
 import { getInnertube, getSignedInnertube } from '@/playback/youtube/innertube';
@@ -26,6 +27,15 @@ const MAX_BYTES = 40 * 1024 * 1024;
  * Throws when the track only streams over SABR, which has no file to fetch.
  */
 export async function fetchTrackAudio(videoId: string, signal?: AbortSignal): Promise<TrackAudio> {
+  // A local file: the Windows app serves the whole thing.
+  const local = localUrl(videoId);
+  if (local) {
+    const response = await fetch(local, { signal });
+    if (!response.ok) throw new Error(`local file: HTTP ${response.status}`);
+    const length = Number(response.headers.get('content-length'));
+    if (length > MAX_BYTES) throw new Error('local file too large to analyse');
+    return { bytes: await response.arrayBuffer(), musicVideo: false };
+  }
   let source = await resolveAudioUrl(videoId);
   const parts: Uint8Array[] = [];
   let at = 0;

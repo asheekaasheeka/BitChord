@@ -76,7 +76,7 @@ export default defineConfig({
   // The connect page only exists in builds that include Discord.
   filterEntrypoints: DISCORD_PRESENCE ? undefined : ['background', 'popup', 'grant', 'relay'],
   hooks: {
-    // Firefox only: the relay content script runs on the site's origins.
+    // Firefox and webview2 only: the relay content script runs on the site's origins.
     'build:manifestGenerated': (wxt, manifest) => {
       for (const script of manifest.content_scripts ?? []) {
         if (script.js?.some((file) => file.includes('relay'))) {

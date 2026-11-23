@@ -1,156 +1,124 @@
-<div align="center">
+# BitChord (personal fork, Windows client)
 
-<br/>
-<br/>
+> [!WARNING]
+> This repository is for **personal use only**. It is not an official BitChord release, it is not supported by the upstream maintainers, and it is not meant for anyone else to use.
+> Original project: [kushagrasinghx/BitChord](https://github.com/kushagrasinghx/BitChord). Report bugs in this fork here, not upstream.
 
-<img src="Logo.png" alt="BitChord app icon" width="200" />
+This fork adds a **Windows client** (a WebView2 shell in `web/windows/`) and several features to the web player (`web/app/`). The Android, TV and backend code is the same as upstream `main`.
 
-# BitChord
+BitChord is not affiliated with, endorsed by, or connected to YouTube, Google, Spotify or Discord.
 
-### Aesthetic YouTube Music Client
+## Why this is not sent upstream
 
-<br/>
+- The maintainers removed the desktop app (`e4dd63d8 chore: remove the desktop app now that the web player replaces it`). A native Windows client goes against that direction.
+- The changes are large and mixed (about 7 features across 75 files) and have no issue. `CONTRIBUTING.md` asks for an issue before big features, and one change per PR.
+- It adds a new stack (C#/.NET 8) and new Microsoft dependencies (see [Dependencies and licensing](#dependencies-and-licensing)).
 
-[![Latest release](https://img.shields.io/github/v/release/kushagrasinghx/BitChord?style=for-the-badge&labelColor=0d1117)](https://github.com/kushagrasinghx/BitChord/releases)
-[![License](https://img.shields.io/github/license/kushagrasinghx/BitChord?style=for-the-badge&labelColor=0d1117)](https://github.com/kushagrasinghx/BitChord/blob/main/LICENSE)
-[![Downloads](https://img.shields.io/github/downloads/kushagrasinghx/BitChord/total?style=for-the-badge&labelColor=0d1117)](https://github.com/kushagrasinghx/BitChord/releases)
-[![Listening now](https://api.bitchord.kushagrasingh.in/api/stats/live/badge.svg)](https://api.bitchord.kushagrasingh.in/api/stats/live)
+To upstream any of it later, split it into small PRs first, starting with the web features (EQ, loudness, sleep timer). Open an issue before proposing the Windows client.
 
-<br/>
+## Added features
 
-[**Download**](#download) · [**Features**](#features) · [**Contributing**](#contributing) · [**Support**](#support) · [**Disclaimer**](#disclaimer)
+### Windows client (`web/windows/`)
+- One `BitChord.exe` (WinForms + WebView2). No Developer mode or "Load unpacked".
+- The web player is bundled and served locally at `https://app.bitchord.example/`. No BitChord website is loaded from the internet.
+- The BitChord extension (`webview2` build) installs automatically and trusts only that app origin.
+- Tray: closing the window hides it to the tray, single instance, Show / Sign out / Quit.
+- "Start with Windows" option (per-user entry in `HKCU\...\Run`, starts hidden in the tray).
+- Fullscreen with F11 and with the player's fullscreen button.
+- Dark title bar; window size and position are remembered.
 
-<br/>
+### Web player features (active in the Windows client)
+- **Equalizer**: 7 bands, presets and preamp, in Settings > Equalizer.
+- **Normalize Volume**: on by default, only lowers the volume, based on YouTube's `loudness_db`.
+- **Spatial Audio**.
+- **Sleep Timer**: moon icon in the player bar, 30-second fade, "End of Track" option.
+- **Local music** (Windows client only): pick folders, tags read through the Windows property system, album art from ID3/FLAC/MP4 tags or `cover.jpg`/`folder.jpg`, format info (bitrate, sample rate, bit depth).
+- **Karaoke / vocal remover** (Windows client only): the UVR MDX-Net model (`UVR_MDXNET_KARA_2.onnx`) runs on ONNX Runtime DirectML (GPU, CPU fallback). The model is downloaded once after you agree, and checked against its SHA-256.
 
-<a href="https://fmhy.net/mobile#youtube-music" target="_blank" rel="noopener noreferrer"><img src="https://cdn.jsdelivr.net/gh/JMcrafter26/badges@main/src/assets/available/fmhy/cozy.svg" alt="Featured on FMHY" height="55"/></a>
-<a href="https://trendshift.io/repositories/177639?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-177639" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/177639" alt="kushagrasinghx%2FBitChord | Trendshift" width="250" height="55"/></a>
+### Known limits
+- Not fully tested: Google sign-in inside WebView2 (Google may block it with "This browser or app may not be secure"), parts of the Discord flow, and some tray menu actions.
+- Listen Together does not work unless `VITE_PARTY_SERVER_URL` is set (the build falls back to a placeholder).
+- Karaoke: a song resumed from the middle must be replayed from the start; songs longer than 10 minutes are refused; stems are not cached; it is off while AutoMix is on; it does not work for local files.
+- Local music in a Listen Together session cannot be heard by other participants.
+- An app update that changes the extension files likely clears `chrome.storage` (reconnect Discord afterwards).
+- No media keys/SMTC, installer or auto-update.
+- Stats for nerds values (Web Audio format, output sample rate) are app telemetry, not proof of hardware or DAC behaviour.
 
-</div>
+## Security risks
 
-> [!IMPORTANT]
-> BitChord is not affiliated with, endorsed by, or connected to YouTube or Google in any way. Use it at your own discretion.
+Read this before signing in.
 
----
+1. **Your Google session is stored on disk.** The login cookie (full access to the Google account, reusable without 2FA) lives in the WebView2 profile at `%LOCALAPPDATA%\BitChord\WebView2`. Windows encrypts it per user (DPAPI), so any program running as your Windows user can read it. Use a **throwaway Google account**, not your main one.
+2. **Other tokens.** The Discord token and Spotify data are kept in the extension's storage in the same profile. Treat that folder like a password: do not back it up to the cloud, share it, or zip it for a bug report.
+3. **Sign out from the tray** deletes cookies, browsing data and the extension's storage. When you stop using the app, also remove the device at myaccount.google.com > Security > Your devices.
+4. **The exe is unsigned.** SmartScreen will warn about it. Only run builds made from your own source. Do not run a zip from someone else.
+5. **The karaoke model download** comes from `github.com/TRvlvr/model_repo` (a third party). The file is used only when its SHA-256 matches, but the model's licence is unclear.
+6. **Navigation is restricted.** Only these hosts open inside the app: the local app, `accounts.google.com`, `accounts.youtube.com`, `music.youtube.com`, `www.youtube.com`, `accounts.spotify.com`, `open.spotify.com`, `discord.com`. Other links open in your normal browser. Other schemes (`file:`, `javascript:`, `data:`) are blocked.
+7. **The native bridge** (karaoke, local music) accepts messages only from the app origin. Google/YouTube pages in the same window cannot call it. Local files are served by ID, not by path, and path traversal is covered by tests.
+8. **Logs** record only the host and the exception type name, never full URLs, cookies or tokens. Still check a log before sharing it: search for `cookie`, `SAPISID`, `token`, `Authorization`.
+9. **Never commit** `local.properties`, `keystore.properties`, `*.jks`, `*.keystore`, or any `.env` file with server URLs. Run `git status` before `git add`.
 
-<div align="center">
+## Stored data
 
-<img src="Banner.png" alt="BitChord banner" width="100%" />
+Everything is under `%LOCALAPPDATA%\BitChord\`:
 
-<h1><a id="features"></a>Features</h1>
+| Path | Contents |
+|------|----------|
+| `WebView2\` | Browser profile: login cookies, extension storage, cache |
+| `window.json` | Window size and position |
+| `local-library.json` | Local music folders and scanned tags |
+| `local-art\` | Album art cache (JPEG) |
+| `models\` | Karaoke model (about 53 MB) |
 
-<table>
-  <tr>
-    <td width="50%" valign="top">
+To uninstall: turn off "Start with Windows" first (or delete the `BitChord` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`), then delete the app folder and the folder above.
 
-#### Playback
-- **Search, browse and play** anything available on YouTube Music.
-- **Hi-Res lossless audio** — FLAC/ALAC from a configured module source, with YouTube Music as fallback.
-- **Gapless playback with true crossfade**, adjustable 0–12s.
-- **Automix [Beta]** — DJ-style transitions with beat-matching and tempo-stretching.
-- **Offline downloads** — save tracks with embedded metadata.
-- **Local music library** integration.
-- **Background playback** via a proper foreground media session.
-- **Apple-like lyrics animation** — credit to [binimum](https://github.com/binimum/am-lyrics).
+## Build
 
-#### Connectivity & Accounts
-- **Sign in with your Google account** for personalized content.
-- **Spotify integration** — connect your account to play your playlists and Liked Songs.
-- **Discord Rich Presence** — in-app login, live track/artist/album and progress.
-- **Scrobbling** to Last.fm and ListenBrainz.
-- **Pluggable sources** — add, edit, test and health-check module sources.
+Needs Node 22 (corepack), the .NET 8 SDK, and Windows 10/11 with the WebView2 Runtime.
 
-    </td>
-    <td width="50%" valign="top">
+```powershell
+cd web
+corepack pnpm install
+corepack pnpm run build:windows
+```
 
-#### Experience
-- **Animated album canvas** — motion artwork on the now-playing screen.
-- **Word-synced lyrics** — word/syllable-level highlighting from multiple sources.
-- **Lyrics providers** — credit to [lrc.red](https://lrc.red), [BiniLyrics](https://github.com/binimum), [BetterLyrics](https://github.com/better-lyrics/better-lyrics), [PaxSenix](https://lyrics.paxsenix.org), [LyricsPlus](https://github.com/ibratabian17/YouLyPlus), [SimpMusic](https://github.com/maxrave-dev/SimpMusic), [Unison](https://unison.boidu.dev), [Megalobiz](https://www.megalobiz.com), [KuGou](https://www.kugou.com), [LRCLIB](https://lrclib.net), [Musixmatch](https://www.musixmatch.com) and [Genius](https://genius.com).
-- **Dynamic, artwork-driven theming** — Material palette extracted from album art.
-- **Frosted-glass UI** — Telegram-style translucent bars via Haze, Material 3 theming.
+The output is in `web/windows/dist/BitChord/` (`BitChord.exe` + `extension\` + `web\`). Use `windows/build.ps1 -Zip` to also make a zip.
 
-#### Controls & Tweaks
-- **Per-network audio quality** — separate quality ceilings for Wi-Fi and mobile data.
-- **Playback speed control** (0.5×–2.0×) and **skip silence**.
-- **Sleep timer** — fixed presets or "stop after this track".
-- **System equalizer** integration.
-- **Bit-perfect USB exclusive output** — sends lossless tracks to a USB DAC unchanged, at each track's own rate and bit depth. Thanks to [Mornye](https://github.com/mornyeapp/Mornye) for the reference.
-- **Stats for nerds** — codec, bit depth, sample rate, and more on the now-playing screen.
+Tests:
 
-    </td>
-  </tr>
-</table>
+```powershell
+cd web
+corepack pnpm test
+dotnet test windows/BitChord.Windows.Tests
+```
 
-</div>
+Optional: set `VITE_PARTY_SERVER_URL` (environment variable or `web/app/.env.local`) so Listen Together works. The party server must allow the origin `https://app.bitchord.example` (`JAM_ALLOWED_ORIGINS`).
 
----
+The Android app builds as upstream: `.\gradlew.bat assembleDevDebug`. Use the `dev` flavour so it does not touch the `prod` app's data.
 
-<div align="center">
+## Syncing with upstream
 
-<h1><a id="download"></a>Download</h1>
+```powershell
+git fetch upstream
+git merge upstream/main
+```
 
-<a href="https://github.com/kushagrasinghx/BitChord/releases" target="_blank" rel="noopener noreferrer"><img src="https://cdn.jsdelivr.net/gh/JMcrafter26/badges@main/src/assets/supported/android/cozy.svg" alt="Download for Android" height="55"/></a>
+This README differs from upstream on purpose, so `README.md` will often conflict on merge. Keep this version.
 
-Grab the latest signed APK from the [Releases](https://github.com/kushagrasinghx/BitChord/releases) page. Sideloading requires enabling "Install unknown apps" for whichever app you download it with.
+## Dependencies and licensing
 
+The code in this repository is licensed under the **GPLv3**, as upstream. See [LICENSE](LICENSE). Copyright of the original code belongs to the BitChord contributors.
 
-</div>
+New dependencies in the Windows client:
 
----
+| Package | Licence | Notes |
+|---------|---------|-------|
+| `Microsoft.Web.WebView2` | Microsoft licence (redistributable) | `WebView2Loader.dll` is bundled into the exe |
+| `Microsoft.ML.OnnxRuntime.DirectML` | MIT (ORT); DirectML: Microsoft redistribution licence | Used by karaoke |
+| UVR MDX-Net model | Unclear | Not bundled; downloaded with the user's consent |
 
-<div align="center">
+Personal use carries no obligations. If you **share** the exe or zip with anyone, the GPLv3 requires you to provide the source under the same licence. Whether the Microsoft components above are compatible with the GPLv3 has not been checked legally. That is another reason not to share this build.
 
-<h1><a id="contributing"></a>Contributing</h1>
+## Disclaimer
 
-We welcome contributions to BitChord! Please review our [Contributing Guide](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md) before submitting a Pull Request.
-
-[**Contributing Guide**](CONTRIBUTING.md) · [**Code of Conduct**](CODE_OF_CONDUCT.md) · [**Maintainers**](MAINTAINERS.md) · [**Additional Docs**](ADDITIONAL.md)
-
-### Thanks to all contributors ❤
-
-<a href="https://github.com/kushagrasinghx/BitChord/graphs/contributors">
-  <img src="https://raw.githubusercontent.com/kushagrasinghx/BitChord/contributors/contributors.svg" />
-</a>
-
-</div>
-
----
-
-<div align="center">
-
-<h1><a id="support"></a>Support</h1>
-
-BitChord is free and always will be — if it's earned a spot in your rotation, you can chip in here:
-
-<a href="https://ko-fi.com/kushagrasinghx" target="_blank" rel="noopener noreferrer"><img src="https://cdn.jsdelivr.net/gh/JMcrafter26/badges@main/src/assets/donate/kofi-singular-alt/cozy.svg" alt="Support me on Ko-fi" height="55"/></a>
-<a href="https://paypal.me/kuxhagrasingh" target="_blank" rel="noopener noreferrer"><img src="https://cdn.jsdelivr.net/gh/JMcrafter26/badges@main/src/assets/donate/paypal-plural/cozy.svg" alt="Support us on PayPal" height="55"/></a>
-
-<br/>
-<img src="upi_support.jpg" alt="UPI Support" width="250" />
-
-</div>
-
----
-
-<div align="center">
-
-<h1><a id="disclaimer"></a>Disclaimer & Legal Notice</h1>
-
-BitChord is an independent, community-driven third-party audio player and client. It is **not** associated with Google LLC, YouTube Music, Deezer, Telegram, or any of their parent companies.
-
-* **No Media Hosting:** BitChord does not host, upload, or store copyrighted music files. It operates strictly as an interface to scan local device storage or stream media directly from public, public-facing, or user-authenticated APIs.
-* **Fair Use & API Usage:** This software is created solely for personal research, educational, and fair-use purposes. The user is entirely responsible for ensuring their usage aligns with their local copyright laws and YouTube Terms of Service.
-* **No Ad-Blocking Guarantee:** While BitChord focuses on providing a clean listening environment, it does not guarantee permanent bypasses or modifications to commercial third-party platform conditions.
-* **Copyleft:** BitChord is free software under the GPLv3. The license does not let anyone forbid others from selling or redistributing copies, but any distribution must come with the Corresponding Source under the same license.
-
-</div>
-
----
-
-<div align="center">
-
-<h1><a id="license"></a>License</h1>
-
-This project is licensed under the **GNU General Public License v3.0 (GPLv3)**. See the [LICENSE](LICENSE) file for details.
-
-</div>
+BitChord does not host or store copyrighted music. You alone are responsible for making sure your use complies with your local copyright law and the Terms of Service of YouTube, Spotify and Discord.

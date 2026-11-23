@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!-- Linked instead of ProjectReference: keeps tests independent of WinForms/WebView2. -->
+  <ItemGroup>
+    <Compile Include="..\BitChord.Windows\NavigationPolicy.cs" Link="NavigationPolicy.cs" />
+    <Compile Include="..\BitChord.Windows\AppFiles.cs" Link="AppFiles.cs" />
+    <Compile Include="..\BitChord.Windows\Karaoke\Fft.cs" Link="Karaoke\Fft.cs" />
+    <Compile Include="..\BitChord.Windows\Karaoke\MdxSeparator.cs" Link="Karaoke\MdxSeparator.cs" />
+    <Compile Include="..\BitChord.Windows\Karaoke\KaraokeMessage.cs" Link="Karaoke\KaraokeMessage.cs" />
+    <Compile Include="..\BitChord.Windows\Karaoke\ModelStore.cs" Link="Karaoke\ModelStore.cs" />
+    <Compile Include="..\BitChord.Windows\Local\LocalLibrary.cs" Link="Local\LocalLibrary.cs" />
+    <Compile Include="..\BitChord.Windows\Local\ShellTags.cs" Link="Local\ShellTags.cs" />
+    <Compile Include="..\BitChord.Windows\Local\EmbeddedArt.cs" Link="Local\EmbeddedArt.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- LocalLibrary.Serve builds WebView2 responses; the tests only touch its parsing and scanning. -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4370.26" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+</Project>

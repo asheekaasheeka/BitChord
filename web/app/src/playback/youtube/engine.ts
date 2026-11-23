@@ -17,6 +17,19 @@ import {
   type ResolvedPlayer,
 } from './resolver';
 import { ShakaPlayerAdapter } from './ShakaPlayerAdapter';
+import { localInfo, localUrl } from '@/data/local/library';
+
+const BUFFERING_GOAL_SEC = 120;
+/** Karaoke's goal: past the end of any track it accepts (10 minutes). */
+const WHOLE_TRACK_SEC = 900;
+
+/** One downloaded segment: the init segment has no times. */
+export interface AudioSegment {
+  stream: string;
+  startSec: number | null;
+  endSec: number | null;
+  bytes: Uint8Array;
+}
 
 /** What the engine knows about the track it loaded. */
 export interface LoadedTrack {
@@ -26,7 +39,8 @@ export interface LoadedTrack {
   durationSec: number;
   /** Largest first. */
   thumbnails: { url: string; width: number; height: number }[];
-  client: PlayerClientName;
+  /** 'local' for a file from the Windows app's local library. */
+  client: PlayerClientName | 'local';
   /** The audio format actually selected, e.g. "251 opus 140kbps". */
   format: string;
   /** The same, field by field, for stats for nerds. */
@@ -42,8 +56,10 @@ export interface StreamStats {
   bitrateKbps: number | null;
   sampleRateHz: number | null;
   channels: number | null;
-  /** "direct" (googlevideo URLs, by range) or "SABR". */
-  mode: 'direct' | 'SABR';
+  /** Bits per sample, for a lossless local file. */
+  bitDepth?: number | null;
+  /** "direct" (googlevideo URLs, by range), "SABR", or "local" (a file the Windows app serves). */
+  mode: 'direct' | 'SABR' | 'local';
 }
 
 /** A music video's picture: a video-only DASH manifest over the same response's direct URLs. */
@@ -85,6 +101,10 @@ const FIRST_AUDIO_TIMEOUT_MS = 15_000;
 export class YouTubeEngine {
   readonly audio: HTMLAudioElement;
   private player: shaka.Player | null = null;
+  /** Shaka holds the element (MediaSource); false while a local file plays from audio.src. */
+  private attached = false;
+  /** The local track playing from audio.src, if any. */
+  private localId: string | null = null;
   private adapter: SabrStreamingAdapter | null = null;
   private yt: Innertube | null = null;
   private generation = 0;
@@ -98,6 +118,9 @@ export class YouTubeEngine {
   onFatal: (videoId: string, message: string, permanent: boolean) => void = () => {};
   /** Raised when the engine moved a track to another client mid-playback. */
   onRecovered: (track: LoadedTrack) => void = () => {};
+  /** Every audio segment Shaka downloads, as it plays it (karaoke rebuilds the file from them). */
+  onSegment: ((videoId: string, segment: AudioSegment) => void) | null = null;
+  private tee: shaka.extern.ResponseFilter | null = null;
 
   constructor(audio: HTMLAudioElement) {
     this.audio = audio;
@@ -108,7 +131,14 @@ export class YouTubeEngine {
   }
 
   private async ensurePlayer(): Promise<shaka.Player> {
-    if (this.player) return this.player;
+    if (this.player) {
+      if (!this.attached) {
+        this.clearLocal();
+        await this.player.attach(this.audio);
+        this.attached = true;
+      }
+      return this.player;
+    }
     shaka.polyfill.installAll();
     if (!shaka.Player.isBrowserSupported()) throw new Error('This browser can’t play YouTube streams (no Media Source Extensions)');
     const player = new shaka.Player();
@@ -128,7 +158,7 @@ export class YouTubeEngine {
       // the body built at 0.4s). With no Shaka-level retries, the failure
       // callback restarts streaming instead, which builds a fresh request.
       streaming: {
-        bufferingGoal: 120,
+        bufferingGoal: BUFFERING_GOAL_SEC,
         rebufferingGoal: 0.01,
         bufferBehind: 300,
         retryParameters: { maxAttempts: 1, baseDelay: 1000, backoffFactor: 1, fuzzFactor: 0.5, timeout: 30_000 },
@@ -140,6 +170,7 @@ export class YouTubeEngine {
       },
     });
     await player.attach(this.audio);
+    this.attached = true;
     player.addEventListener('error', (event) => this.onShakaError((event as unknown as { detail: shaka.util.Error }).detail));
     this.player = player;
     return player;
@@ -162,6 +193,8 @@ export class YouTubeEngine {
     const started = performance.now();
     trackLog.i(`loading at ${startSec.toFixed(1)}s`, videoId);
     try {
+      const local = localUrl(videoId);
+      if (local) return await this.startLocal(videoId, local, startSec, autoplay, generation);
       const player = await this.ensurePlayer();
       this.yt ??= await timed('InnerTube session', videoId, getInnertube);
       void botguard.init().catch((error: unknown) => trackLog.w(`BotGuard init failed: ${String(error)}`, videoId));
@@ -211,6 +244,81 @@ export class YouTubeEngine {
     }
   }
 
+  /** The track this engine has finished loading; null while a load is in flight. */
+  get loadedVideoId(): string | null {
+    return this.loading ? null : (this.current?.videoId ?? this.localId);
+  }
+
+  /**
+   * A file from the Windows app's local library: Shaka lets go of the element and it plays the URL
+   * itself, which seeks by byte range (Local/LocalLibrary.cs). The next YouTube load re-attaches Shaka.
+   */
+  private async startLocal(videoId: string, url: string, startSec: number, autoplay: boolean, generation: number): Promise<LoadedTrack> {
+    if (this.player && this.attached) {
+      await this.player.detach();
+      this.attached = false;
+    }
+    this.adapter?.dispose();
+    this.adapter = null;
+    this.current = null;
+    this.direct = null;
+    this.checkCurrent(generation);
+    this.localId = videoId;
+    const audio = this.audio;
+    audio.src = url;
+    await new Promise<void>((resolve, reject) => {
+      const done = () => (cleanup(), resolve());
+      const fail = () => (cleanup(), reject(new UnplayableError('This file can’t be played (unsupported format, or it moved)')));
+      // A newer load replacing this src never fires either event; don't wait on it forever.
+      const timer = setTimeout(() => (cleanup(), reject(new SupersededError('Replaced by a newer load'))), FIRST_AUDIO_TIMEOUT_MS);
+      const cleanup = () => {
+        clearTimeout(timer);
+        audio.removeEventListener('loadedmetadata', done);
+        audio.removeEventListener('error', fail);
+      };
+      audio.addEventListener('loadedmetadata', done);
+      audio.addEventListener('error', fail);
+    });
+    this.checkCurrent(generation);
+    if (startSec > 0) audio.currentTime = startSec;
+    if (autoplay) {
+      await audio.play().catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'NotAllowedError') trackLog.w('autoplay was blocked by the browser; waiting for a tap', videoId);
+        else throw error;
+      });
+    }
+    await this.firstAudio(generation);
+    const info = localInfo(videoId);
+    const stream: StreamStats = {
+      codec: info?.codec ?? null,
+      itag: null,
+      bitrateKbps: info?.bitrateKbps ?? null,
+      sampleRateHz: info?.sampleRateHz ?? null,
+      channels: info?.channels ?? null,
+      bitDepth: info?.bitDepth ?? null,
+      mode: 'local',
+    };
+    return {
+      videoId,
+      title: '',
+      author: '',
+      durationSec: Number.isFinite(audio.duration) ? audio.duration : 0,
+      thumbnails: [],
+      client: 'local',
+      format: [stream.codec, stream.bitrateKbps && `${stream.bitrateKbps}kbps`].filter(Boolean).join(' ') || 'local file',
+      stream,
+      loudnessDb: null,
+    };
+  }
+
+  private clearLocal() {
+    if (this.localId === null) return;
+    this.localId = null;
+    this.audio.pause();
+    this.audio.removeAttribute('src');
+    this.audio.load();
+  }
+
   private checkCurrent(generation: number) {
     if (generation !== this.generation) throw new SupersededError('Replaced by a newer load');
   }
@@ -232,6 +340,7 @@ export class YouTubeEngine {
     const direct = hasDirectAudio(info);
     const manifest = direct ? await this.directManifest(resolved) : await this.sabrManifest(player, resolved);
     this.checkCurrent(generation);
+    this.teeSegments(player, videoId);
     const mode = direct ? 'direct' : 'SABR';
 
     await timed(`${client} ${mode} load`, videoId, () =>
@@ -333,6 +442,41 @@ export class YouTubeEngine {
       manifest_options: { include_thumbnails: false },
     });
     return { videoId, manifest, aspect: largest.width! / largest.height!, heights };
+  }
+
+  /**
+   * Hands each init and media segment to [onSegment]. Registered again for every stream so it runs
+   * after the SABR adapter's own response filter (Shaka runs them in order), which turns UMP into media.
+   */
+  private teeSegments(player: shaka.Player, videoId: string) {
+    const net = player.getNetworkingEngine();
+    if (!net) return;
+    if (this.tee) net.unregisterResponseFilter(this.tee);
+    const { INIT_SEGMENT, MEDIA_SEGMENT } = shaka.net.NetworkingEngine.AdvancedRequestType;
+    this.tee = (type, response, context) => {
+      const sink = this.onSegment;
+      const kind = context?.type;
+      if (!sink || type !== shaka.net.NetworkingEngine.RequestType.SEGMENT) return;
+      if (kind !== INIT_SEGMENT && kind !== MEDIA_SEGMENT) return;
+      const segment = kind === MEDIA_SEGMENT ? context?.segment : null;
+      if (kind === MEDIA_SEGMENT && !segment) return;
+      const data = response.data;
+      const bytes = ArrayBuffer.isView(data)
+        ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice()
+        : new Uint8Array(data.slice(0));
+      sink(videoId, {
+        stream: String(context?.stream?.id ?? ''),
+        startSec: segment ? segment.getStartTime() : null,
+        endSec: segment ? segment.getEndTime() : null,
+        bytes,
+      });
+    };
+    net.registerResponseFilter(this.tee);
+  }
+
+  /** Buffers the whole track (karaoke needs all of it) or goes back to the usual two minutes ahead. */
+  bufferWholeTrack(on: boolean) {
+    this.player?.configure({ streaming: { bufferingGoal: on ? WHOLE_TRACK_SEC : BUFFERING_GOAL_SEC } });
   }
 
   /** The SABR session: googlevideo's adapter in front of Shaka (Kira, googlevideo's example). */
@@ -466,6 +610,7 @@ export class YouTubeEngine {
 
   async stop(): Promise<void> {
     this.generation++;
+    this.clearLocal();
     this.current = null;
     this.direct = null;
     await this.player?.unload();

@@ -55,3 +55,42 @@ jobs:
         run: pnpm build
         env:
           VITE_PARTY_SERVER_URL: https://party.example.com
+
+  # The Windows client (web/windows): WebView2 shell plus the extension's webview2 build,
+  # packed as a portable zip. Unsigned, not released; the zip is a workflow artifact.
+  windows:
+    name: Windows · test, package
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      # Unlike the web job's throwaway build, this zip bundles the player, so it needs the real
+      # party server. Without the secret (fork PRs) build.ps1 stops with a clear message.
+      - name: Build
+        shell: pwsh
+        run: ./web/windows/build.ps1 -Zip
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+          VITE_PARTY_SERVER_URL: ${{ secrets.VITE_PARTY_SERVER_URL }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BitChord-windows-x64
+          path: web/windows/dist/BitChord-windows-x64.zip
+          if-no-files-found: error
