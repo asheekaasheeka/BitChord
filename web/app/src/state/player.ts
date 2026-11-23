@@ -21,6 +21,7 @@ import {
   type QueueSource,
 } from '@/playback/queue/timeline';
 import { trackLog } from '@/playback/trackLog';
+import { isLocal } from '@/data/local/library';
 import { cleanBands } from '@/playback/equalizer';
 import { loudnessGain } from '@/playback/loudness';
 import type { LoadedTrack, StreamStats, YouTubeEngine } from '@/playback/youtube/engine';
@@ -204,6 +205,27 @@ export function getPlayhead(): { sec: number; paused: boolean } | null {
     if (sec !== null) return { sec, paused: false };
   }
   return audio ? { sec: audio.currentTime, paused: audio.paused } : null;
+}
+
+let deviceRate: number | null | undefined;
+
+/**
+ * Where decoded audio goes, for stats for nerds: through Web Audio (EQ, spatial, AutoMix, karaoke) or
+ * straight to Chromium's output, and the rate it is mixed at. Both paths run at the output device's
+ * rate, which a throwaway AudioContext reports. Not what the DAC receives: Windows' shared mixer has the last word.
+ */
+export function audioOutput(): { webAudio: boolean; sampleRateHz: number | null } {
+  if (graph) return { webAudio: true, sampleRateHz: graph.ctx.sampleRate };
+  if (deviceRate === undefined) {
+    try {
+      const probe = new AudioContext();
+      deviceRate = probe.sampleRate;
+      void probe.close();
+    } catch {
+      deviceRate = null;
+    }
+  }
+  return { webAudio: false, sampleRateHz: deviceRate };
 }
 
 /** The running Automix blend's beat (phase 0 on the beat), for the seek bar's pulse; null between blends. */
@@ -927,6 +949,8 @@ function refillAutoplay(force = false, anySeed = false): Promise<void> {
   if (needed <= 0) return Promise.resolve();
   // Seeded from the playing track (loadAutoplayForCurrentTrack), not the queue's tail.
   const playing = queue[index]?.track;
+  // YouTube Music's radio has nothing to say about a local file.
+  if (isLocal(playing?.videoId)) return Promise.resolve();
   let seed = playing;
   if (seed && exhaustedSeeds.has(seed.videoId) && anySeed) {
     seed = queue
@@ -1098,7 +1122,7 @@ function applyTrack(track: LoadedTrack, from?: Track) {
     artist: (from && artistNames(from)) || track.author.replace(/ - Topic$/, ''),
     artworkUrl: from?.thumbnail ?? track.thumbnails[0]?.url ?? null,
     durationSec: track.durationSec || from?.durationSec || 0,
-    streamInfo: `${track.format} via ${track.client}`,
+    streamInfo: track.client === 'local' ? `${track.format}, local file` : `${track.format} via ${track.client}`,
     stream: { ...track.stream, client: track.client },
   };
   usePlayer.setState({ nowPlaying, error: null });

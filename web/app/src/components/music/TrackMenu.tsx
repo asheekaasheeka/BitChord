@@ -8,6 +8,7 @@ import {
   useSetLiked,
   useSignedIn,
 } from '@/data/music/queries';
+import { isLocal } from '@/data/local/library';
 import type { Track } from '@/data/music/types';
 import { usePlayer } from '@/state/player';
 
@@ -91,7 +92,7 @@ function TrackMenuItems({ track, onClose }: { track: Track; onClose: () => void 
       <MenuItem icon={<ListEnd size={15} />} onSelect={() => (onClose(), addToQueue([track]))}>
         Add to Queue
       </MenuItem>
-      {signedIn && <AccountItems track={track} onClose={onClose} onPlaylists={() => setView('playlists')} />}
+      {signedIn && !isLocal(track.videoId) && <AccountItems track={track} onClose={onClose} onPlaylists={() => setView('playlists')} />}
     </>
   );
 }

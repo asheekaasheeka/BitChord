@@ -15,9 +15,14 @@
     <Compile Include="..\BitChord.Windows\Karaoke\MdxSeparator.cs" Link="Karaoke\MdxSeparator.cs" />
     <Compile Include="..\BitChord.Windows\Karaoke\KaraokeMessage.cs" Link="Karaoke\KaraokeMessage.cs" />
     <Compile Include="..\BitChord.Windows\Karaoke\ModelStore.cs" Link="Karaoke\ModelStore.cs" />
+    <Compile Include="..\BitChord.Windows\Local\LocalLibrary.cs" Link="Local\LocalLibrary.cs" />
+    <Compile Include="..\BitChord.Windows\Local\ShellTags.cs" Link="Local\ShellTags.cs" />
+    <Compile Include="..\BitChord.Windows\Local\EmbeddedArt.cs" Link="Local\EmbeddedArt.cs" />
   </ItemGroup>
 
   <ItemGroup>
+    <!-- LocalLibrary.Serve builds WebView2 responses; the tests only touch its parsing and scanning. -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4370.26" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />

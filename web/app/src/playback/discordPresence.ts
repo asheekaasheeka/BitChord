@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import type { DiscordNowPlaying } from '@bitchord/shared/bridge';
+import { isLocal } from '@/data/local/library';
 import { getBridge } from '@/extension/bridge';
 import { useDiscord, useDiscordOptions } from '@/extension/useDiscord';
 import { sizedArtwork } from '@/lib/artwork';
@@ -22,7 +23,8 @@ const ART_PX = 480;
 function nowPlaying(): DiscordNowPlaying | null {
   const { nowPlaying: np, queue, index } = usePlayer.getState();
   const audio = getAudio();
-  if (!np) return null;
+  // Discord's buttons link the track on YouTube Music; a local file has no page there.
+  if (!np || isLocal(np.videoId)) return null;
   const durationSec = audio && Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : np.durationSec;
   return {
     videoId: np.videoId,

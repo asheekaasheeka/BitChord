@@ -1,4 +1,4 @@
-import { ArrowUpRight, ListMusic, Settings } from 'lucide-react';
+import { ArrowUpRight, FolderOpen, ListMusic, Settings } from 'lucide-react';
 import { MdOutlineExtension } from 'react-icons/md';
 import { PrefetchLink, PrefetchNavLink } from '@/components/PrefetchLink';
 import { LogoMark } from '@/components/icons/LogoMark';
@@ -15,6 +15,7 @@ import {
   type NavIconProps,
 } from '@/components/icons/NavIcons';
 import { hrefFor } from '@/components/music/links';
+import { localSupported } from '@/data/local/library';
 import { config } from '@/config';
 import { LIBRARY_SECTIONS, type LibrarySection } from '@/data/music/library';
 import { useLibraryPlaylists, useSignedIn } from '@/data/music/queries';
@@ -34,6 +35,19 @@ const PRIMARY: NavItem[] = [
   { to: '/search', label: 'Search', Icon: SearchIcon },
   { to: '/home', label: 'Home', Icon: HomeIcon },
   { to: '/new', label: 'New', Icon: NewIcon },
+];
+
+// Windows app only: the folders on this PC.
+const LOCAL: NavItem[] = [
+  {
+    to: '/local',
+    label: 'Local Files',
+    Icon: ({ className }) => (
+      <span className={className}>
+        <FolderOpen size={19} strokeWidth={1.8} />
+      </span>
+    ),
+  },
 ];
 
 const LIBRARY_ICONS: Record<Exclude<LibrarySection, 'playlists'>, NavItem['Icon']> = {
@@ -159,6 +173,7 @@ export function Sidebar() {
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto pr-3 pl-5 [scrollbar-width:none]">
           <NavList items={PRIMARY} onNavigate={close} />
+          {localSupported && <NavList items={LOCAL} onNavigate={close} />}
           {signedIn && <LibraryNav onNavigate={close} />}
           {spotifySignedIn && <SpotifyNav onNavigate={close} />}
         </div>

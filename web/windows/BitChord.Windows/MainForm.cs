@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 using BitChord.Windows.Karaoke;
+using BitChord.Windows.Local;
 
 namespace BitChord.Windows;
 
@@ -19,6 +20,7 @@ sealed class MainForm : Form
 
     readonly Tray tray;
     KaraokeBridge? karaoke;
+    LocalBridge? local;
     bool quitting;
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
@@ -86,6 +88,8 @@ sealed class MainForm : Form
             // Main window only (popups keep web messages off); the bridge answers the player's origin alone.
             core.Settings.IsWebMessageEnabled = true;
             karaoke = new KaraokeBridge(this, core);
+            Browser.Local ??= new LocalLibrary(AppPaths.LocalLibraryFile);
+            local = new LocalBridge(this, core, Browser.Local);
             // The player's fullscreen button (requestFullscreen) otherwise fills only the control, not the screen.
             core.ContainsFullScreenElementChanged += (_, _) => { pageFullscreen = core.ContainsFullScreenElement; ApplyFullscreen(); };
             await InstallExtensionAsync(core.Profile);
@@ -290,6 +294,7 @@ sealed class MainForm : Form
     {
         tray.Dispose();
         karaoke?.Dispose();
+        local?.Dispose();
         base.OnFormClosed(e);
     }
 

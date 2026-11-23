@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Microsoft.Web.WebView2.Core;
+using BitChord.Windows.Local;
 
 namespace BitChord.Windows;
 
@@ -48,6 +49,19 @@ static class Browser
         if (!Uri.TryCreate(e.Request.Uri, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps
             || !uri.Host.Equals(NavigationPolicy.AppHost, StringComparison.OrdinalIgnoreCase)) return;
         var env = ((CoreWebView2)sender!).Environment;
+        if (uri.AbsolutePath.StartsWith(LocalLibrary.ArtPrefix, StringComparison.Ordinal))
+        {
+            ServeArt(e, env, uri.AbsolutePath[LocalLibrary.ArtPrefix.Length..]);
+            return;
+        }
+        if (uri.AbsolutePath.StartsWith(LocalLibrary.UrlPrefix, StringComparison.Ordinal))
+        {
+            var headers = e.Request.Headers;
+            e.Response = Local == null
+                ? env.CreateWebResourceResponse(null, 404, "Not Found", "")
+                : Local.Serve(env, uri, headers.Contains("Range") ? headers.GetHeader("Range") : null);
+            return;
+        }
         var file = AppFiles.Find(AppPaths.WebFolder, uri);
         // A page with no file is a client route: give it index.html, as the Pages site does. Assets still 404.
         if (file == null && e.ResourceContext == CoreWebView2WebResourceContext.Document)
@@ -64,6 +78,40 @@ static class Browser
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             e.Response = env.CreateWebResourceResponse(null, 404, "Not Found", "");
+        }
+    }
+
+    // The user's local music, served under /local/ (set by MainForm).
+    public static LocalLibrary? Local { get; set; }
+    static LocalArt? art;
+
+    // /local-art/<id>: extraction runs off the UI thread; the response is built back on it, where WebView2 wants it.
+    static async void ServeArt(CoreWebView2WebResourceRequestedEventArgs e, CoreWebView2Environment env, string id)
+    {
+        var track = Local?.Find(id);
+        if (track == null)
+        {
+            e.Response = env.CreateWebResourceResponse(null, 404, "Not Found", "");
+            return;
+        }
+        var deferral = e.GetDeferral();
+        try
+        {
+            art ??= new LocalArt(AppPaths.LocalArtFolder);
+            var image = await art.GetAsync(track);
+            e.Response = image == null
+                ? env.CreateWebResourceResponse(null, 404, "Not Found", "")
+                : env.CreateWebResourceResponse(new MemoryStream(image.Bytes), 200, "OK",
+                    $"Content-Type: {image.ContentType}\nCache-Control: max-age=86400\nX-Content-Type-Options: nosniff");
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"local art failed: {ex.GetType().Name}");
+            e.Response = env.CreateWebResourceResponse(null, 404, "Not Found", "");
+        }
+        finally
+        {
+            deferral.Complete();
         }
     }
 

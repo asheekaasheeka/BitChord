@@ -1,3 +1,4 @@
+import { Music } from 'lucide-react';
 import { useState, type CSSProperties } from 'react';
 import { sizedArtwork } from '@/lib/artwork';
 
@@ -16,6 +17,18 @@ interface ArtworkProps {
 const frame = 'relative isolate w-full overflow-hidden bg-joe artwork-stroke';
 
 /**
+ * A note on the placeholder colour, under the artwork: what shows while it loads, and for good when
+ * there is none (a local file without a cover) or it fails. [size] is the glyph's CSS px.
+ */
+export function ArtPlaceholder({ size }: { size: number }) {
+  return (
+    <span className="absolute inset-0 grid place-items-center text-tertiary" aria-hidden="true">
+      <Music size={Math.round(size)} strokeWidth={1.6} />
+    </span>
+  );
+}
+
+/**
  * Fixed-aspect artwork: a neutral placeholder until the image decodes, then a
  * short fade (prompt §3). The 0.5px inner stroke is Apple's "has-borders"
  * treatment (report §1).
@@ -32,6 +45,7 @@ export function Artwork({ src, displayWidth, aspect = 1, radius, className, eage
       className={className ? `${frame} ${className}` : frame}
       style={{ aspectRatio: String(aspect), borderRadius: radius }}
     >
+      {!loaded && <ArtPlaceholder size={Math.min(64, displayWidth * 0.42)} />}
       {url && (
         <img
           key={`${url}#${attempt}`}

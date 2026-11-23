@@ -17,6 +17,7 @@ import {
   type ResolvedPlayer,
 } from './resolver';
 import { ShakaPlayerAdapter } from './ShakaPlayerAdapter';
+import { localInfo, localUrl } from '@/data/local/library';
 
 const BUFFERING_GOAL_SEC = 120;
 /** Karaoke's goal: past the end of any track it accepts (10 minutes). */
@@ -38,7 +39,8 @@ export interface LoadedTrack {
   durationSec: number;
   /** Largest first. */
   thumbnails: { url: string; width: number; height: number }[];
-  client: PlayerClientName;
+  /** 'local' for a file from the Windows app's local library. */
+  client: PlayerClientName | 'local';
   /** The audio format actually selected, e.g. "251 opus 140kbps". */
   format: string;
   /** The same, field by field, for stats for nerds. */
@@ -54,8 +56,10 @@ export interface StreamStats {
   bitrateKbps: number | null;
   sampleRateHz: number | null;
   channels: number | null;
-  /** "direct" (googlevideo URLs, by range) or "SABR". */
-  mode: 'direct' | 'SABR';
+  /** Bits per sample, for a lossless local file. */
+  bitDepth?: number | null;
+  /** "direct" (googlevideo URLs, by range), "SABR", or "local" (a file the Windows app serves). */
+  mode: 'direct' | 'SABR' | 'local';
 }
 
 /** A music video's picture: a video-only DASH manifest over the same response's direct URLs. */
@@ -97,6 +101,10 @@ const FIRST_AUDIO_TIMEOUT_MS = 15_000;
 export class YouTubeEngine {
   readonly audio: HTMLAudioElement;
   private player: shaka.Player | null = null;
+  /** Shaka holds the element (MediaSource); false while a local file plays from audio.src. */
+  private attached = false;
+  /** The local track playing from audio.src, if any. */
+  private localId: string | null = null;
   private adapter: SabrStreamingAdapter | null = null;
   private yt: Innertube | null = null;
   private generation = 0;
@@ -123,7 +131,14 @@ export class YouTubeEngine {
   }
 
   private async ensurePlayer(): Promise<shaka.Player> {
-    if (this.player) return this.player;
+    if (this.player) {
+      if (!this.attached) {
+        this.clearLocal();
+        await this.player.attach(this.audio);
+        this.attached = true;
+      }
+      return this.player;
+    }
     shaka.polyfill.installAll();
     if (!shaka.Player.isBrowserSupported()) throw new Error('This browser can’t play YouTube streams (no Media Source Extensions)');
     const player = new shaka.Player();
@@ -155,6 +170,7 @@ export class YouTubeEngine {
       },
     });
     await player.attach(this.audio);
+    this.attached = true;
     player.addEventListener('error', (event) => this.onShakaError((event as unknown as { detail: shaka.util.Error }).detail));
     this.player = player;
     return player;
@@ -177,6 +193,8 @@ export class YouTubeEngine {
     const started = performance.now();
     trackLog.i(`loading at ${startSec.toFixed(1)}s`, videoId);
     try {
+      const local = localUrl(videoId);
+      if (local) return await this.startLocal(videoId, local, startSec, autoplay, generation);
       const player = await this.ensurePlayer();
       this.yt ??= await timed('InnerTube session', videoId, getInnertube);
       void botguard.init().catch((error: unknown) => trackLog.w(`BotGuard init failed: ${String(error)}`, videoId));
@@ -228,7 +246,77 @@ export class YouTubeEngine {
 
   /** The track this engine has finished loading; null while a load is in flight. */
   get loadedVideoId(): string | null {
-    return this.loading ? null : (this.current?.videoId ?? null);
+    return this.loading ? null : (this.current?.videoId ?? this.localId);
+  }
+
+  /**
+   * A file from the Windows app's local library: Shaka lets go of the element and it plays the URL
+   * itself, which seeks by byte range (Local/LocalLibrary.cs). The next YouTube load re-attaches Shaka.
+   */
+  private async startLocal(videoId: string, url: string, startSec: number, autoplay: boolean, generation: number): Promise<LoadedTrack> {
+    if (this.player && this.attached) {
+      await this.player.detach();
+      this.attached = false;
+    }
+    this.adapter?.dispose();
+    this.adapter = null;
+    this.current = null;
+    this.direct = null;
+    this.checkCurrent(generation);
+    this.localId = videoId;
+    const audio = this.audio;
+    audio.src = url;
+    await new Promise<void>((resolve, reject) => {
+      const done = () => (cleanup(), resolve());
+      const fail = () => (cleanup(), reject(new UnplayableError('This file can’t be played (unsupported format, or it moved)')));
+      // A newer load replacing this src never fires either event; don't wait on it forever.
+      const timer = setTimeout(() => (cleanup(), reject(new SupersededError('Replaced by a newer load'))), FIRST_AUDIO_TIMEOUT_MS);
+      const cleanup = () => {
+        clearTimeout(timer);
+        audio.removeEventListener('loadedmetadata', done);
+        audio.removeEventListener('error', fail);
+      };
+      audio.addEventListener('loadedmetadata', done);
+      audio.addEventListener('error', fail);
+    });
+    this.checkCurrent(generation);
+    if (startSec > 0) audio.currentTime = startSec;
+    if (autoplay) {
+      await audio.play().catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'NotAllowedError') trackLog.w('autoplay was blocked by the browser; waiting for a tap', videoId);
+        else throw error;
+      });
+    }
+    await this.firstAudio(generation);
+    const info = localInfo(videoId);
+    const stream: StreamStats = {
+      codec: info?.codec ?? null,
+      itag: null,
+      bitrateKbps: info?.bitrateKbps ?? null,
+      sampleRateHz: info?.sampleRateHz ?? null,
+      channels: info?.channels ?? null,
+      bitDepth: info?.bitDepth ?? null,
+      mode: 'local',
+    };
+    return {
+      videoId,
+      title: '',
+      author: '',
+      durationSec: Number.isFinite(audio.duration) ? audio.duration : 0,
+      thumbnails: [],
+      client: 'local',
+      format: [stream.codec, stream.bitrateKbps && `${stream.bitrateKbps}kbps`].filter(Boolean).join(' ') || 'local file',
+      stream,
+      loudnessDb: null,
+    };
+  }
+
+  private clearLocal() {
+    if (this.localId === null) return;
+    this.localId = null;
+    this.audio.pause();
+    this.audio.removeAttribute('src');
+    this.audio.load();
   }
 
   private checkCurrent(generation: number) {
@@ -522,6 +610,7 @@ export class YouTubeEngine {
 
   async stop(): Promise<void> {
     this.generation++;
+    this.clearLocal();
     this.current = null;
     this.direct = null;
     await this.player?.unload();
