@@ -10,6 +10,18 @@ sealed class Tray : IDisposable
         var menu = new ContextMenuStrip();
         menu.Items.Add("Show", null, (_, _) => show());
         menu.Items.Add("Sign out", null, (_, _) => signOut());
+        var startup = new ToolStripMenuItem("Start with Windows") { CheckOnClick = true };
+        menu.Opening += (_, _) => startup.Checked = Startup.Enabled; // re-read: the user may change it in Task Manager
+        startup.Click += (_, _) =>
+        {
+            try { Startup.Enabled = startup.Checked; }
+            catch (Exception e) when (e is UnauthorizedAccessException or System.Security.SecurityException or IOException)
+            {
+                startup.Checked = !startup.Checked;
+                MessageBox.Show($"Could not change the startup setting.\n\n{e.Message}", "BitChord", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        };
+        menu.Items.Add(startup);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Quit", null, (_, _) => quit());
         icon = new NotifyIcon

@@ -218,6 +218,20 @@ sealed class MainForm : Form
         }
     }
 
+    // Started with Windows: wait in the tray. The player loads (OnLoad) on the first Show.
+    bool startHidden = Startup.LaunchedAtStartup;
+
+    protected override void SetVisibleCore(bool value)
+    {
+        if (startHidden)
+        {
+            startHidden = false;
+            if (!IsHandleCreated) CreateHandle(); // the single-instance Show signal needs a handle
+            value = false;
+        }
+        base.SetVisibleCore(value);
+    }
+
     public void ShowFromTray()
     {
         Show();
