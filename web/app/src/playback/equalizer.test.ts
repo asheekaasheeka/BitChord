@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanBands, EQ_PRESETS, MasterEq, matchingPreset, preampDb, sectionGainDb, softClip } from './equalizer';
+import { cleanBands, EQ_PRESETS, MasterEffects, matchingPreset, preampDb, sectionGainDb, softClip } from './equalizer';
 
 describe('equalizer', () => {
   it('a bell reaches its gain at the centre, a shelf far past its corner', () => {
@@ -27,7 +27,7 @@ describe('equalizer', () => {
     expect(cleanBands([20, -20, 'x', 3])).toEqual([12, -12, 0, 3, 0, 0, 0]);
   });
 
-  it('wires one straight chain with no loop, and bypasses it when off', () => {
+  it('wires the effects with no loop, and bypasses them when both are off', () => {
     const edges = new Set<string>();
     let n = 0;
     class Node {
@@ -41,20 +41,20 @@ describe('equalizer', () => {
         for (const e of [...edges]) if (e.startsWith(`${this.id}>`)) edges.delete(e);
       }
     }
-    Object.assign(globalThis, { BiquadFilterNode: Node, GainNode: Node, WaveShaperNode: Node });
+    for (const name of ['BiquadFilterNode', 'GainNode', 'WaveShaperNode', 'ChannelSplitterNode', 'ChannelMergerNode', 'DelayNode', 'IIRFilterNode'])
+      Object.assign(globalThis, { [name]: Node });
     const from = new Node();
     const to = new Node();
-    const eq = new MasterEq({ currentTime: 0 } as unknown as BaseAudioContext, from as never, to as never);
-    const chain = [...edges];
-    expect(chain.some((e) => e.split('>')[0] === e.split('>')[1])).toBe(false);
-    // 7 filters -> preamp -> shaper -> to is 9 edges, plus the bypass from -> to.
-    expect(chain).toHaveLength(10);
+    const fx = new MasterEffects({ currentTime: 0, sampleRate: 48_000 } as unknown as BaseAudioContext, from as never, to as never);
+    expect([...edges].some((e) => e.split('>')[0] === e.split('>')[1])).toBe(false);
     expect(edges.has(`${from.id}>${to.id}`)).toBe(true);
 
-    eq.set(true, [...EQ_PRESETS.Rock]);
-    expect(edges.has(`${from.id}>${to.id}`)).toBe(false);
-    expect([...edges].filter((e) => e.startsWith(`${from.id}>`))).toHaveLength(1);
-    eq.set(false, [...EQ_PRESETS.Rock]);
+    for (const [eqOn, spatialOn] of [[true, false], [false, true]] as const) {
+      fx.set(eqOn, [...EQ_PRESETS.Rock], spatialOn);
+      expect(edges.has(`${from.id}>${to.id}`)).toBe(false);
+      expect([...edges].filter((e) => e.startsWith(`${from.id}>`))).toHaveLength(1);
+    }
+    fx.set(false, [...EQ_PRESETS.Rock], false);
     expect(edges.has(`${from.id}>${to.id}`)).toBe(true);
   });
 

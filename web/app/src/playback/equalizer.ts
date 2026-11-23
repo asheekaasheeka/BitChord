@@ -1,3 +1,5 @@
+import { SpatialStage } from './spatial';
+
 /**
  * The phone's manual equaliser (shared/.../playback/EqualizerCurve.kt and EqualizerPreset.kt):
  * seven sliders, the same presets and the same make-up attenuation, as Web Audio filters on the
@@ -104,11 +106,12 @@ export function softClip(x: number): number {
 }
 
 /**
- * [from] → seven filters → preamp → soft clip → [to]. Off, [from] goes straight to [to],
- * so the clip never touches audio the user didn't ask to change.
+ * [from] → spatial → seven filters → preamp → soft clip → [to]. With both effects off, [from] goes
+ * straight to [to], so the clip never touches audio the user didn't ask to change.
  */
-export class MasterEq {
-  private readonly input: BiquadFilterNode;
+export class MasterEffects {
+  private readonly input: AudioNode;
+  private readonly spatial: SpatialStage;
   private readonly filters: BiquadFilterNode[];
   private readonly preamp: GainNode;
   private on = false;
@@ -124,7 +127,9 @@ export class MasterEq {
     });
     // Chain each filter to the next; never a filter to itself (a feedback loop that screams).
     for (let i = 1; i < this.filters.length; i++) this.filters[i - 1]!.connect(this.filters[i]!);
-    this.input = this.filters[0]!;
+    this.spatial = new SpatialStage(ctx);
+    this.spatial.output.connect(this.filters[0]!);
+    this.input = this.spatial.input;
     this.preamp = new GainNode(ctx, { gain: 1 / HEADROOM });
     const curve = new Float32Array(4097);
     for (let i = 0; i < curve.length; i++) curve[i] = softClip(((i / (curve.length - 1)) * 2 - 1) * HEADROOM);
@@ -133,10 +138,12 @@ export class MasterEq {
     from.connect(to);
   }
 
-  /** Glides to the new curve, so a slider drag or a preset never clicks. */
-  set(on: boolean, bands: readonly number[]): void {
+  /** Glides to the new settings, so a slider drag or a preset never clicks. */
+  set(eqOn: boolean, bands: readonly number[], spatialOn: boolean): void {
     const now = this.ctx.currentTime;
-    const gains = on ? cleanBands(bands) : EQ_BANDS_HZ.map(() => 0);
+    const gains = eqOn ? cleanBands(bands) : EQ_BANDS_HZ.map(() => 0);
+    this.spatial.set(spatialOn);
+    const on = eqOn || spatialOn;
     this.filters.forEach((f, i) => f.gain.setTargetAtTime(gains[i]!, now, 0.02));
     this.preamp.gain.setTargetAtTime(10 ** (preampDb(gains) / 20) / HEADROOM, now, 0.02);
     if (on === this.on) return;

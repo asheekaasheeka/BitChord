@@ -66,7 +66,9 @@ export default function SettingsPage() {
   const showNerdStats = usePlayer((s) => s.showNerdStats);
   const shareHistory = useHistorySettings((s) => s.share);
   const setShareHistory = useHistorySettings((s) => s.setShare);
-  const { setAutoplay, setCrossfade, setAutomix, setAutomixBars, setShowNerdStats } = usePlayer.getState();
+  const normalize = usePlayer((s) => s.normalize);
+  const spatial = usePlayer((s) => s.spatial);
+  const { setAutoplay, setCrossfade, setAutomix, setAutomixBars, setShowNerdStats, setNormalize, setSpatial } = usePlayer.getState();
   const [lyrics, setLyrics] = useState(false);
   const present = extension.state === 'present';
   const discordText =
@@ -170,6 +172,18 @@ export default function SettingsPage() {
               />
             </label>
           )}
+          <Toggle
+            label="Normalize Volume"
+            detail="Turns loud songs down to YouTube’s reference level, so every song plays at about the same volume."
+            checked={normalize}
+            onChange={setNormalize}
+          />
+          <Toggle
+            label="Spatial Audio"
+            detail="Wider stereo with a little cross-feed between the ears. Best on headphones."
+            checked={spatial}
+            onChange={setSpatial}
+          />
           <Toggle
             label="Show Stats for Nerds"
             detail="Codec, bitrate and sample rate under the artist in the full-screen player, and what Automix is doing."
