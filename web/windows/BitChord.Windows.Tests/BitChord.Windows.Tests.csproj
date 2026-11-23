@@ -11,6 +11,10 @@
   <ItemGroup>
     <Compile Include="..\BitChord.Windows\NavigationPolicy.cs" Link="NavigationPolicy.cs" />
     <Compile Include="..\BitChord.Windows\AppFiles.cs" Link="AppFiles.cs" />
+    <Compile Include="..\BitChord.Windows\Karaoke\Fft.cs" Link="Karaoke\Fft.cs" />
+    <Compile Include="..\BitChord.Windows\Karaoke\MdxSeparator.cs" Link="Karaoke\MdxSeparator.cs" />
+    <Compile Include="..\BitChord.Windows\Karaoke\KaraokeMessage.cs" Link="Karaoke\KaraokeMessage.cs" />
+    <Compile Include="..\BitChord.Windows\Karaoke\ModelStore.cs" Link="Karaoke\ModelStore.cs" />
   </ItemGroup>
 
   <ItemGroup>

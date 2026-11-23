@@ -18,6 +18,18 @@ import {
 } from './resolver';
 import { ShakaPlayerAdapter } from './ShakaPlayerAdapter';
 
+const BUFFERING_GOAL_SEC = 120;
+/** Karaoke's goal: past the end of any track it accepts (10 minutes). */
+const WHOLE_TRACK_SEC = 900;
+
+/** One downloaded segment: the init segment has no times. */
+export interface AudioSegment {
+  stream: string;
+  startSec: number | null;
+  endSec: number | null;
+  bytes: Uint8Array;
+}
+
 /** What the engine knows about the track it loaded. */
 export interface LoadedTrack {
   videoId: string;
@@ -98,6 +110,9 @@ export class YouTubeEngine {
   onFatal: (videoId: string, message: string, permanent: boolean) => void = () => {};
   /** Raised when the engine moved a track to another client mid-playback. */
   onRecovered: (track: LoadedTrack) => void = () => {};
+  /** Every audio segment Shaka downloads, as it plays it (karaoke rebuilds the file from them). */
+  onSegment: ((videoId: string, segment: AudioSegment) => void) | null = null;
+  private tee: shaka.extern.ResponseFilter | null = null;
 
   constructor(audio: HTMLAudioElement) {
     this.audio = audio;
@@ -128,7 +143,7 @@ export class YouTubeEngine {
       // the body built at 0.4s). With no Shaka-level retries, the failure
       // callback restarts streaming instead, which builds a fresh request.
       streaming: {
-        bufferingGoal: 120,
+        bufferingGoal: BUFFERING_GOAL_SEC,
         rebufferingGoal: 0.01,
         bufferBehind: 300,
         retryParameters: { maxAttempts: 1, baseDelay: 1000, backoffFactor: 1, fuzzFactor: 0.5, timeout: 30_000 },
@@ -211,6 +226,11 @@ export class YouTubeEngine {
     }
   }
 
+  /** The track this engine has finished loading; null while a load is in flight. */
+  get loadedVideoId(): string | null {
+    return this.loading ? null : (this.current?.videoId ?? null);
+  }
+
   private checkCurrent(generation: number) {
     if (generation !== this.generation) throw new SupersededError('Replaced by a newer load');
   }
@@ -232,6 +252,7 @@ export class YouTubeEngine {
     const direct = hasDirectAudio(info);
     const manifest = direct ? await this.directManifest(resolved) : await this.sabrManifest(player, resolved);
     this.checkCurrent(generation);
+    this.teeSegments(player, videoId);
     const mode = direct ? 'direct' : 'SABR';
 
     await timed(`${client} ${mode} load`, videoId, () =>
@@ -333,6 +354,41 @@ export class YouTubeEngine {
       manifest_options: { include_thumbnails: false },
     });
     return { videoId, manifest, aspect: largest.width! / largest.height!, heights };
+  }
+
+  /**
+   * Hands each init and media segment to [onSegment]. Registered again for every stream so it runs
+   * after the SABR adapter's own response filter (Shaka runs them in order), which turns UMP into media.
+   */
+  private teeSegments(player: shaka.Player, videoId: string) {
+    const net = player.getNetworkingEngine();
+    if (!net) return;
+    if (this.tee) net.unregisterResponseFilter(this.tee);
+    const { INIT_SEGMENT, MEDIA_SEGMENT } = shaka.net.NetworkingEngine.AdvancedRequestType;
+    this.tee = (type, response, context) => {
+      const sink = this.onSegment;
+      const kind = context?.type;
+      if (!sink || type !== shaka.net.NetworkingEngine.RequestType.SEGMENT) return;
+      if (kind !== INIT_SEGMENT && kind !== MEDIA_SEGMENT) return;
+      const segment = kind === MEDIA_SEGMENT ? context?.segment : null;
+      if (kind === MEDIA_SEGMENT && !segment) return;
+      const data = response.data;
+      const bytes = ArrayBuffer.isView(data)
+        ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice()
+        : new Uint8Array(data.slice(0));
+      sink(videoId, {
+        stream: String(context?.stream?.id ?? ''),
+        startSec: segment ? segment.getStartTime() : null,
+        endSec: segment ? segment.getEndTime() : null,
+        bytes,
+      });
+    };
+    net.registerResponseFilter(this.tee);
+  }
+
+  /** Buffers the whole track (karaoke needs all of it) or goes back to the usual two minutes ahead. */
+  bufferWholeTrack(on: boolean) {
+    this.player?.configure({ streaming: { bufferingGoal: on ? WHOLE_TRACK_SEC : BUFFERING_GOAL_SEC } });
   }
 
   /** The SABR session: googlevideo's adapter in front of Shaka (Kira, googlevideo's example). */

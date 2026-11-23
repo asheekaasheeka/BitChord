@@ -12,6 +12,7 @@ import { enabledSources } from '@/lyrics/settings';
 import { sourceById, type LyricsSourceId } from '@/lyrics/sources';
 import { useLyrics, useLyricsUi } from '@/lyrics/useLyrics';
 import { getAudio, getPlayhead, usePlayer } from '@/state/player';
+import { KaraokeButton } from './KaraokeButton';
 import { LyricsSettings } from './LyricsSettings';
 
 type AmLyricsElement = HTMLElement & {
@@ -264,13 +265,16 @@ function ProviderPicker({ current, full }: { current: LyricsSourceId | null; ful
         <span>{label}</span>
         <ChevronDown size={14} />
       </button>
-      <button
-        className="grid size-7 place-items-center rounded-[8px] text-secondary hover:bg-quinary"
-        aria-label="Lyric settings"
-        onClick={() => setSettings(true)}
-      >
-        <Settings2 size={16} />
-      </button>
+      <div className="flex items-center gap-1">
+        <KaraokeButton />
+        <button
+          className="grid size-7 place-items-center rounded-[8px] text-secondary hover:bg-quinary"
+          aria-label="Lyric settings"
+          onClick={() => setSettings(true)}
+        >
+          <Settings2 size={16} />
+        </button>
+      </div>
       {anchor && (
         <Menu anchor={anchor} placement="below-end" onClose={close} label="Lyrics provider">
           <MenuItem checked={!picked} onSelect={() => (close(), pick(videoId, null))}>

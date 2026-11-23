@@ -186,6 +186,7 @@ function getDecks(): Promise<Deck[]> {
       // is fetched with CORS (prompt §6, the Web Audio caveat).
       audio.crossOrigin = 'anonymous';
       const engine = new YouTubeEngine(audio);
+      engine.onSegment = segmentSink;
       const deck: Deck = { engine, audio, gain: 1 };
       engine.onFatal = (videoId, message) => {
         if (decks?.[active] !== deck) return;
@@ -350,6 +351,27 @@ function automixHandoff() {
   applyTrack(loaded.track, entry.track);
   afterTrackStarted();
   intent();
+}
+
+// ---- Karaoke (playback/karaoke): the front deck's stems in place of its element ----
+
+type SegmentSink = YouTubeEngine['onSegment'];
+let segmentSink: SegmentSink = null;
+
+/** Every segment either deck downloads goes to [sink]; set once, before or after the decks exist. */
+export function setSegmentSink(sink: SegmentSink): void {
+  segmentSink = sink;
+  for (const deck of decks ?? []) deck.engine.onSegment = sink;
+}
+
+/** The deck in front, routed through Web Audio (the graph is built on first use); null before the first play. */
+export async function karaokeRoute() {
+  const g = await ensureAutomix();
+  const deck = decks?.[active];
+  const routed = g?.decks[active];
+  if (!g || !deck || !routed) return null;
+  void g.ctx.resume();
+  return { audio: deck.audio, engine: deck.engine, ctx: g.ctx, source: routed.source, input: routed.eq.input };
 }
 
 /** Starts or stops the mix loop to match the setting; the first start builds the graph. */

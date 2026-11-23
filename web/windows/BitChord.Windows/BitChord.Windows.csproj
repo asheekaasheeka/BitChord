@@ -17,6 +17,8 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4370.26" />
+    <!-- Karaoke: runs the UVR MDX-Net model on any DirectX 12 GPU, CPU otherwise. MIT. -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.24.4" />
   </ItemGroup>
 
   <!-- The shell loads the extension from <exe dir>\extension. Build it first:

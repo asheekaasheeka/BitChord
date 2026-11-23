@@ -8,6 +8,11 @@ import '@/styles/global.css';
 
 const router = createBrowserRouter(routes);
 
+// Inside the Windows app only: karaoke collects each song's segments from the first one on.
+if ((window as { chrome?: { webview?: unknown } }).chrome?.webview) {
+  void import('@/playback/karaoke').then((m) => m.installKaraoke());
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>

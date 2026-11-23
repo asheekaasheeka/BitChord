@@ -10,4 +10,5 @@ public static class AppPaths
     public static string WebFolder { get; } = Path.Combine(AppContext.BaseDirectory, "web"); // web/app's production build
     public static string WindowStateFile { get; } = Path.Combine(Root, "window.json");
     public static string TrayHintFile { get; } = Path.Combine(Root, "tray-hint-shown");
+    public static string ModelsFolder { get; } = Path.Combine(Root, "models"); // karaoke models, downloaded on first use
 }

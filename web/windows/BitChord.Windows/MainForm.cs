@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
+using BitChord.Windows.Karaoke;
 
 namespace BitChord.Windows;
 
@@ -17,6 +18,7 @@ sealed class MainForm : Form
     record SavedWindow(int X, int Y, int Width, int Height, bool Maximized);
 
     readonly Tray tray;
+    KaraokeBridge? karaoke;
     bool quitting;
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
@@ -74,6 +76,9 @@ sealed class MainForm : Form
             if (!File.Exists(index)) throw new FileNotFoundException($"The web player is missing. Reinstall the app.\n\nExpected file:\n{index}");
             Browser.Configure(core);
             Browser.ServeApp(core);
+            // Main window only (popups keep web messages off); the bridge answers the player's origin alone.
+            core.Settings.IsWebMessageEnabled = true;
+            karaoke = new KaraokeBridge(this, core);
             await InstallExtensionAsync(core.Profile);
             if (IsDisposed || Disposing) return;
             core.Navigate(Browser.StartUri.AbsoluteUri);
@@ -228,6 +233,7 @@ sealed class MainForm : Form
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         tray.Dispose();
+        karaoke?.Dispose();
         base.OnFormClosed(e);
     }
 
