@@ -84,6 +84,8 @@ corepack pnpm run build:windows
 
 The output is in `web/windows/dist/BitChord/` (`BitChord.exe` + `extension\` + `web\`). Use `windows/build.ps1 -Zip` to also make a zip.
 
+The exe is self-contained (the .NET runtime is inside it), so the target PC needs only the WebView2 Runtime. Each build also writes `README.txt` (setup steps for the person you give it to, plus the source URL and commit) and `LICENSE.txt` next to the exe, as the GPLv3 requires when you share a copy.
+
 Tests:
 
 ```powershell

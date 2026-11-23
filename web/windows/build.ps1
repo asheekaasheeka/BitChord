@@ -77,8 +77,9 @@ foreach ($dir in $publish, $stage) {
     if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
 }
 Invoke-Native 'dotnet publish' {
-    & $dotnet publish (Join-Path $windows 'BitChord.Windows') -c Release -r win-x64 --self-contained false `
-        -p:PublishSingleFile=true -o $publish
+    # Self-contained: the .NET runtime ships inside the exe, so the user installs nothing (WebView2 aside).
+    & $dotnet publish (Join-Path $windows 'BitChord.Windows') -c Release -r win-x64 --self-contained true `
+        -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -o $publish
 }
 
 # The csproj copies the extension into the publish dir; without it the app shows an error popup.
@@ -95,6 +96,59 @@ New-Item -ItemType Directory -Force $stage | Out-Null
 Copy-Item (Join-Path $publish 'BitChord.exe') $stage
 Copy-Item -Recurse (Join-Path $publish 'extension') $stage
 Copy-Item -Recurse (Join-Path $publish 'web') $stage
+
+# GPLv3 section 6: every copy handed out says where its exact source is. The URL comes from the origin
+# remote with any credentials stripped (an https://user:token@ remote must never end up in the zip).
+$repoRoot = Split-Path $web -Parent
+Copy-Item (Join-Path $repoRoot 'LICENSE') (Join-Path $stage 'LICENSE.txt')
+$sourceUrl = $null
+$commit = $null
+$git = Get-Command git -ErrorAction SilentlyContinue
+# try: under PowerShell 5.1 with Stop, any git stderr line would end the build.
+if ($git) { try {
+    $remote = & git -C $repoRoot remote get-url origin 2>$null
+    if ($LASTEXITCODE -eq 0 -and $remote) {
+        $remote = $remote.Trim() -replace '^git@github\.com:', 'https://github.com/' -replace '\.git$', ''
+        $u = $null
+        if ([Uri]::TryCreate($remote, [UriKind]::Absolute, [ref]$u) -and $u.Scheme -eq 'https') {
+            $sourceUrl = 'https://' + $u.Host + $u.AbsolutePath.TrimEnd('/')
+        }
+    }
+    $commit = & git -C $repoRoot rev-parse --short HEAD 2>$null
+    if ($LASTEXITCODE -ne 0) { $commit = $null }
+    elseif (& git -C $repoRoot status --porcelain --untracked-files=no 2>$null) { $commit = "$commit (plus uncommitted changes)" }
+} catch { $commit = $null } }
+if (-not $sourceUrl) { Write-Warning 'No https origin remote: README.txt will not name the source repository.' }
+$readme = @"
+BitChord for Windows (personal build)
+=====================================
+
+How to start
+1. Extract this whole zip into a folder that stays, for example C:\Apps\BitChord\
+   (not inside the zip, and not a folder you clean up later).
+2. Double-click BitChord.exe.
+3. Windows may show "Windows protected your PC" because the app is not signed.
+   Click "More info", then "Run anyway". This is needed only the first time.
+4. If it says the WebView2 Runtime is missing (some Windows 10 PCs), install
+   "Evergreen Bootstrapper" from https://developer.microsoft.com/microsoft-edge/webview2/
+   and start BitChord again. Windows 11 already has it.
+5. Sign in with your own account. Closing the window keeps the music playing in
+   the tray (near the clock). Right-click the tray icon for Sign out and Quit.
+
+Nothing else needs installing: .NET is inside BitChord.exe.
+
+Your data stays on this PC, in %LOCALAPPDATA%\BitChord (sign-in, settings, cache).
+Never copy that folder to anyone: it holds your login. To remove the app, use
+"Sign out" in the tray, quit, then delete this folder and %LOCALAPPDATA%\BitChord.
+
+BitChord is not affiliated with YouTube, Google, Spotify or Discord.
+
+Licence
+BitChord is free software under the GNU General Public License v3.0 (LICENSE.txt).
+You may use, share and change it under that licence.
+Source code: $(if ($sourceUrl) { $sourceUrl } else { 'ask the person who gave you this copy' })$(if ($commit) { "`r`nVersion: commit $commit" })
+"@
+[IO.File]::WriteAllText((Join-Path $stage 'README.txt'), ($readme -replace "`r?`n", "`r`n"), (New-Object Text.UTF8Encoding $true))
 Write-Host "==> Ready to run: $(Join-Path $stage 'BitChord.exe')"
 
 if (-not $Zip) { return }
